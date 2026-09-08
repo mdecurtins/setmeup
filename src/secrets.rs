@@ -70,6 +70,31 @@ pub fn select_backend(
     }
 }
 
+/// True when the platform keyring store is reachable on this machine.
+///
+/// Uses `keyring::v1::Entry::store_status`; a `Ok(())` means a real store
+/// (Secret Service, Keychain, or Credential Manager) is available. On a fresh
+/// headless machine with no secret service daemon, this returns false and
+/// setmeup falls back to the age-encrypted vault file.
+pub fn keyring_available() -> bool {
+    keyring::v1::Entry::store_status().is_ok()
+}
+
+/// Auto-select the strongest backend for the current machine at write time.
+///
+/// The ladder (per design): keyring when a store is reachable, else the
+/// age-encrypted vault file. There is no plaintext fallback.
+pub fn auto_select_backend() -> Box<dyn SecretBackend> {
+    if keyring_available() {
+        Box::new(KeyringBackend)
+    } else {
+        Box::new(VaultFileBackend::new(
+            config::secrets_vault_path(),
+            Box::new(EnvPassphraseProvider),
+        ))
+    }
+}
+
 /// Provides the vault passphrase (never the secret itself).
 pub trait PassphraseProvider: fmt::Debug {
     fn passphrase(&self) -> Result<SecretString>;
@@ -344,6 +369,7 @@ pub fn chmod_600(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use age::secrecy::ExposeSecret;
 
     fn passphrase() -> SecretString {
         SecretString::from("test-passphrase".to_string())
@@ -379,6 +405,53 @@ mod tests {
             !raw_string.contains("s3cr3t-value"),
             "plaintext value must never appear in the vault file"
         );
+    }
+
+    #[test]
+    fn delete_missing_is_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut b = vault_backend(dir.path());
+        // Deleting a nonexistent secret should succeed as a no-op.
+        b.delete("never-set").unwrap();
+        assert!(b.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn overwrite_replaces_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut b = vault_backend(dir.path());
+        b.set("tok", "v1").unwrap();
+        b.set("tok", "v2").unwrap();
+        assert_eq!(b.get("tok").unwrap(), "v2");
+        assert_eq!(b.list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn get_missing_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = vault_backend(dir.path());
+        let err = b.get("missing").unwrap_err();
+        assert!(err.to_string().contains("no such secret"));
+    }
+
+    #[test]
+    fn chmod_600_sets_owner_only_on_unix() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("vault");
+        fs::write(&f, b"x").unwrap();
+        chmod_600(&f).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&f).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+    }
+
+    #[test]
+    fn prompter_provider_returns_value() {
+        let p = PromptPassphraseProvider::new("prompt", passphrase());
+        assert_eq!(p.passphrase().unwrap().expose_secret(), "test-passphrase");
     }
 
     #[test]

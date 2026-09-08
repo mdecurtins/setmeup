@@ -311,6 +311,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn register_ssh_key_rejects_unknown_provider() {
+        let err = register_ssh_key("bitbucket", "tok", "ssh-ed25519 AAA").unwrap_err();
+        assert!(err.to_string().contains("unsupported provider"));
+    }
+
+    #[test]
+    fn any_identity_exists_checks_backup_root() {
+        // With a backup file present, identity must be considered to exist
+        // regardless of the local ~/.ssh state.
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("ssh-keys.age"), b"encrypted").unwrap();
+        assert!(any_identity_exists(Some(dir.path())));
+
+        // Without any backup, the result is driven by the real ~/.ssh presence;
+        // assert against the actual state to stay deterministic and hermetic.
+        let empty = tempfile::tempdir().unwrap();
+        let expected = ssh_key_exists().unwrap_or(false);
+        assert_eq!(any_identity_exists(Some(empty.path())), expected);
+    }
+
+    #[test]
+    fn chmod_600_sets_owner_only_on_unix() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("key");
+        fs::write(&f, b"x").unwrap();
+        chmod_600(&f).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&f).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+    }
+
+    #[test]
     fn find_marker_works() {
         let hay = b"header-data\n---PUBKEY---\nkey-data";
         let marker = b"\n---PUBKEY---\n";

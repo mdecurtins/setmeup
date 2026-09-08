@@ -305,7 +305,9 @@ fn cmd_secrets(action: SecretsAction) -> Result<i32> {
 }
 
 fn default_secret_backend() -> Result<Box<dyn SecretBackend>> {
-    secrets::select_backend(BackendKind::VaultFile, None)
+    // 4.4 backend auto-selection: strongest reachable backend (keyring when
+    // available, else age vault file). No plaintext fallback.
+    Ok(secrets::auto_select_backend())
 }
 
 // ---------------------------------------------------------------------------
