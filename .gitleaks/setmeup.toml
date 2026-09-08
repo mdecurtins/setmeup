@@ -1,0 +1,23 @@
+# gitleaks config for setmeup
+# Trust boundary (AGENTS.md): this is a PUBLIC repo. Nothing secret may enter git.
+# This config extends gitleaks' default ruleset and carries the reviewed allowlist
+# for legitimate non-secret content that matches secret-like patterns.
+#
+# Allowlist discipline:
+#   - Every entry must name WHY it is a false positive (test fixture, docs example).
+#   - Allowlist changes are reviewable in the PR that touches this file.
+#   - The allowlist is a gate refinement, not a bypass: entries must be narrowly
+#     scoped (commits, paths, regex) rather than globally disabling a rule.
+
+[extend]
+useDefault = true
+
+[allowlist]
+  description = "Reviewed false positives - each entry documents why it is not a secret"
+
+  # Placeholder values used only in specs/docs/tests. None are real; they follow
+  # an obviously-fake pattern (prefix Fake). Any real credential found is a bug.
+  regexes = [
+    '''ghp_Fake[A-Za-z0-9]+''',         # fake GitHub tokens in specs/skill examples
+    '''gho_Fake[A-Za-z0-9]+''',         # fake GitHub OAuth tokens in examples
+  ]

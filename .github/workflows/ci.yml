@@ -1,0 +1,60 @@
+name: CI
+
+# Enforcement, not decoration. Each job maps to a contract clause from AGENTS.md:
+#   fmt/clippy/test  -> "What done means" quality gate
+#   gitleaks         -> "Trust boundary" secret scan (public repo)
+#   maintainability  -> lean workflow, one enforcement per job
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    name: quality (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Enforce formatting
+        run: cargo fmt --check
+
+      - name: Enforce lint (warnings denied)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run test suite
+        run: cargo test --all-features
+
+  secrets:
+    name: secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan for leaked secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks/setmeup.toml
+        # Fail closed: any secret-like pattern in tracked content blocks the change.
+        # Legitimate false positives are allowlisted in .gitleaks/setmeup.toml (reviewed).

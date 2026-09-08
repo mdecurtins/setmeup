@@ -1,0 +1,26 @@
+schema: spec-driven
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+context: |
+  setmeup: personal, declarative machine-provisioning tool (Rust, single binary CLI + TUI).
+  Default platform is Ubuntu on WSL2; also supports macOS and native Windows
+  (Windows steers users to WSL2 when absent; Git Bash is not a supported path).
+  Public repo: secret/key material must NEVER enter git — credentials live only in the
+  age/keyring vault and non-git backup paths.
+  Spec-driven development via OpenSpec (changes live under openspec/changes/).
+  Agentic development: root AGENTS.md, curated .opencode/skills/, CI-enforced quality gates.
+  Conventional commits; small focused commits; never commit without explicit user approval.
+  Engineering principles from ~/.config/opencode/AGENTS.md apply (SOLID, testing, YAGNI,
+  idempotency, minimal dependencies, pinned versions, security hygiene).
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
