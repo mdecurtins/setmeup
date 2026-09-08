@@ -34,5 +34,5 @@
 - [x] 5.1 Local gate run on current repo: fmt, clippy `-D warnings`, tests (even before product code, this validates the toolchain setup)
 - [x] 5.2 Simulate an advisory/deny violation and confirm the gate fails
 - [x] 5.3 Simulate a shell violation (bad shellcheck) and confirm the gate fails
-- [ ] 5.4 Confirm a new PR's default body renders the checklist review items
-- [ ] 5.5 Confirm issue → change → PR → close works end-to-end with the github-issues skill
+- [x] 5.4 Confirm a new PR's default body renders the checklist review items
+- [x] 5.5 Confirm issue → change → PR → close works end-to-end with the github-issues skill
