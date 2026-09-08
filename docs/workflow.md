@@ -70,3 +70,14 @@ The shared engineering principles from `~/.config/opencode/AGENTS.md` apply here
 ## Keeping this current
 
 This doc is a live artifact. When the workflow materially changes — a skill is added or pruned, CI gates change, a new change convention appears — this file and `AGENTS.md` are updated together. A stale `docs/workflow.md` would be worse than none.
+
+## Lessons learned (from the first full cycle)
+
+The `dev-governance` branch was the first to run the whole loop (issues → branch → PR → review → merge → close → archive). What it taught us:
+
+- **The done-gate is narrower than it looks.** We verified gates in the *scaffold phase* (coverage script, shellcheck, cargo-deny against scratch fixtures) rather than on the merged repo. That verification caught real defects, but only because we probed with *negative* tests — simulating a leak, a bad script, a vulnerable dependency. A gate verified only by "it exists" is decoration.
+- **Fail-open is the enemy of a quality gate.** Review found the coverage gate exited 0 when a report contained files but none matched the core modules — a silent bypass at 0% coverage. Fixed to fail closed (`#7`, `9031cd9`). Rule we now apply: if a gate is supposed to *enforce*, its "nothing to enforce" case must fail, not pass.
+- **Probe-crafted tools need honest fixture tests.** The coverage script, shellcheck, and cargo-deny were all validated against synthetic inputs (pass, fail, no-match, empty). That's the `probe-verify` skill applied to our own tooling.
+- **The issue → change → PR → merge → close → archive trace works, but only if you run it to the end.** GitHub auto-closed only the *first* issue listed in "Closes #1-5"; `#2-5` needed explicit closing. Lesson: don't assume the merge auto-closes every referenced issue — verify with a final sweep (no open issues, no open PRs, exactly the intended active changes), as we now do.
+- **Conventional-commit discipline pays off at review.** Four focused commits (templates, docs, gates, artifacts) rendered a diff a reviewer could actually reason about. The one defect found was *inside* one commit, not smeared across the whole branch.
+- **The `gh issue create` flags differ from `gh api`.** `--jq` isn't supported on `gh issue create` (the skill documented `gh api` for writes); we captured URLs from output instead. Detail, but it cost one failed call — worth noting in the `github-issues` skill.
