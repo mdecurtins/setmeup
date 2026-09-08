@@ -9,11 +9,16 @@ context: |
   (Windows steers users to WSL2 when absent; Git Bash is not a supported path).
   Public repo: secret/key material must NEVER enter git — credentials live only in the
   age/keyring vault and non-git backup paths.
-  Spec-driven development via OpenSpec (changes live under openspec/changes/).
+  Spec-driven development via OpenSpec (changes live under openspec/changes/);
+  every actionable issue seeds a change; the change's proposal references the issue;
+  the PR references the change and issue; merge closes the issue; archive is the
+  terminal step (no dangling artifacts).
   Agentic development: root AGENTS.md, curated .opencode/skills/, CI-enforced quality gates.
+  Quality gates: fmt/clippy/test, coverage floor on core modules (manifest/secrets/identity),
+  cargo deny, shellcheck/shfmt, gitleaks secret scan.
   Conventional commits; small focused commits; never commit without explicit user approval.
   Engineering principles from ~/.config/opencode/AGENTS.md apply (SOLID, testing, YAGNI,
-  idempotency, minimal dependencies, pinned versions, security hygiene).
+  idempotency, minimal dependencies, exact pinned versions, security hygiene).
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.

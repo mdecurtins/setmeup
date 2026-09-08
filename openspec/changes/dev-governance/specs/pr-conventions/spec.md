@@ -46,3 +46,25 @@ The review SHALL apply the substantive checklist, not a lightweight approval, so
 #### Scenario: Review record
 - **WHEN** a merge is reviewed
 - **THEN** the review record reflects which checklist items were checked
+
+### Requirement: Change archived as part of the branch lifecycle
+The change SHALL be archived before its branch is considered closed, so the OpenSpec archive is the terminal artifact of the change, not a follow-up chore.
+
+#### Scenario: Branch lands for a change
+- **WHEN** a branch implementing a change passes all gates and is merged
+- **THEN** the change is archived (delta specs synced to main specs; change dir moved to `openspec/changes/archive/`)
+
+#### Scenario: Archive commit is the last commit for a change
+- **WHEN** a change is fully implemented and merged
+- **THEN** the archive commit is the final commit carrying that change's work, landing only after the done-gate, review, and issue verification all pass
+
+### Requirement: No dangling open artifacts
+The workflow SHALL NOT leave open changes, open issues referenced by a merged change, or unarchived completed changes after the relevant branch is merged.
+
+#### Scenario: Merged change with open issue
+- **WHEN** a PR that resolves an issue is merged
+- **THEN** the referenced issue is closed and the change is archived, leaving no dangling artifact
+
+#### Scenario: Completed but unarchived change
+- **WHEN** a change's tasks are all complete and its branch merged
+- **THEN** the change is archived; it is not left sitting in the active changes list
