@@ -1,9 +1,13 @@
 name: CI
 
-# Enforcement, not decoration. Each job maps to a contract clause from AGENTS.md:
-#   fmt/clippy/test  -> "What done means" quality gate
-#   gitleaks         -> "Trust boundary" secret scan (public repo)
-#   maintainability  -> lean workflow, one enforcement per job
+# Enforcement, not decoration. Each job maps to a contract clause:
+#   fmt/clippy/test        -> "What done means" quality gate (dev-workflow)
+#   coverage               -> dev-governance quality-gates: focused lib floor
+#   deps                   -> dev-governance quality-gates: cargo deny (advisories/licenses/sources)
+#   shell                  -> dev-governance quality-gates: shellcheck + shfmt
+#   secrets                -> "Trust boundary" secret scan (public repo)
+# Cargo-gated steps skip until the setmeup-core crate exists, so CI stays green
+# during scaffold-only phases and enforces fully once product code lands.
 
 on:
   push:
@@ -27,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain (pinned)
+      - name: Install Rust toolchain (pinned via rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -35,13 +39,96 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Enforce formatting
+        if: hashFiles('Cargo.toml') != ''
         run: cargo fmt --check
 
       - name: Enforce lint (warnings denied)
+        if: hashFiles('Cargo.toml') != ''
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Run test suite
+        if: hashFiles('Cargo.toml') != ''
         run: cargo test --all-features
+
+      - name: Verify toolchain pin is active
+        run: |
+          rustc --version
+          test -f rust-toolchain.toml
+
+  coverage:
+    name: core-module coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain with llvm-tools
+        if: hashFiles('Cargo.toml') != ''
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        if: hashFiles('Cargo.toml') != ''
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Collect coverage
+        if: hashFiles('Cargo.toml') != ''
+        run: cargo llvm-cov --all-features --json --output-path coverage.json
+
+      - name: Gate core modules at 80% floor (module-specific, not whole crate)
+        if: hashFiles('Cargo.toml') != ''
+        run: python3 .github/scripts/check-core-coverage.py coverage.json --floor 80
+
+  deps:
+    name: dependency gate (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-deny
+        if: hashFiles('Cargo.toml') != ''
+        uses: taiki-e/install-action@cargo-deny
+
+      - name: Run cargo deny (advisories, licenses, sources)
+        if: hashFiles('Cargo.toml') != ''
+        run: cargo deny check
+
+  shell:
+    name: shell gate (shellcheck + shfmt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck and shfmt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          curl -sSfL https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64 -o /usr/local/bin/shfmt
+          chmod +x /usr/local/bin/shfmt
+
+      - name: Find shell scripts
+        id: find-shell
+        run: |
+          FILES=$(find . -type f -name '*.sh' -not -path './.git/*' -not -path './.opencode/node_modules/*' || true)
+          echo "FILES<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$FILES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Run shellcheck
+        run: |
+          if [ -z "${{ steps.find-shell.outputs.FILES }}" ]; then
+            echo "No shell scripts found; nothing to lint."
+            exit 0
+          fi
+          printf '%s\n' "${{ steps.find-shell.outputs.FILES }}" | xargs shellcheck
+
+      - name: Run shfmt check (formatting diff)
+        run: |
+          if [ -z "${{ steps.find-shell.outputs.FILES }}" ]; then
+            echo "No shell scripts found; nothing to format-check."
+            exit 0
+          fi
+          printf '%s\n' "${{ steps.find-shell.outputs.FILES }}" | xargs shfmt -d
 
   secrets:
     name: secret scan (gitleaks)

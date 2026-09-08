@@ -15,14 +15,15 @@ Three ideas carry the whole design:
 ## The loop
 
 ```
- explore → propose → implement → review → merge (PR) → converge
+ explore → propose → implement → review → merge (PR) → archive → no dangling artifacts
 ```
 
 1. **Explore** (`/opsx-explore`): think before committing to a shape. This pass produced the design decisions recorded in each change's `design.md`.
-2. **Propose** (`/opsx-propose`): create an OpenSpec change — proposal, specs, design, tasks — validated by `openspec validate`.
+2. **Propose** (`/opsx-propose`): create an OpenSpec change — proposal, specs, design, tasks — validated by `openspec validate`. The proposal references the issue that seeds the change.
 3. **Implement** (`/opsx-apply`): work tasks in order. Each task is a checkbox; each is marked complete only when the done-gate holds.
-4. **Review**: every PR gets a checklist review — done-gate, alignment to spec/issue, security-sensitive paths, credible risk claim. See `dev-governance`.
+4. **Review**: every PR gets a checklist review before merge (see governance, below).
 5. **Merge**: every change lands as a branch + PR; no direct-to-main. The public history is the durable evidence of the process.
+6. **Archive**: once a branch's change is merged, the change is archived (`openspec archive`) as the *final commit* for that change — after the done-gate, review, and issue verification all pass. No open changes, open issues referenced by a merged change, or unarchived completed changes are left dangling after a branch merges.
 
 ## What "done" means
 
@@ -37,6 +38,20 @@ A task or change is done only when all four hold, per `AGENTS.md`:
 
 This repo is **public**. The contract therefore treats secret-handling as a correctness boundary, not a convention: credentials live only in the age/keyring vault and non-git backup paths; CI runs a gitleaks scan that fails a change if secret-like patterns appear in tracked content. That is not a README warning — it is a gate. The allowlist for legitimate false positives lives in `.gitleaks/setmeup.toml` and is itself reviewable.
 
+## Governance (issue → change → PR → archive)
+
+The policy layer lives in the `dev-governance` change (archived spec: `openspec/specs/`). In force since that branch landed:
+
+- **Branch + PR pipeline.** Every code change ships on a branch and lands via PR; no direct-to-main. Branch naming: `feat/<issue-number>-<change-slug>`, referencing the issue that seeds the change.
+- **Checklist review gate.** Every PR receives a substantive checklist review — by an agent or a human — before merge, covering:
+  1. Done-checklist satisfied (fmt, clippy, tests, spec scenarios)
+  2. Alignment with the change's spec/design and the issue it resolves
+  3. Security-sensitive paths inspected (secrets, git hygiene, identity, credentials — trust boundary)
+  4. Risk claim credible (what could go wrong, mitigation)
+  The PR template (`.github/PULL_REQUEST_TEMPLATE.md`) carries these; the review-gate entry point lives in the project skills.
+- **Archive is the terminal step.** A change is archived as the *final commit* for its branch — only after the done-gate, review, and verification of the tagged issue(s) all pass. The archive syncs the change's delta specs into main specs and moves the change to `openspec/changes/archive/`.
+- **No dangling artifacts.** After a branch merges: no open issues referenced by the merged change, no unarchived completed changes, no open changes whose work shipped. Everything closes; nothing is left in a half state.
+
 ## The pieces, and where they live
 
 | Concern | Location |
@@ -44,7 +59,7 @@ This repo is **public**. The contract therefore treats secret-handling as a corr
 | Agent contract | `AGENTS.md` (repo root) |
 | OpenSpec changes | `openspec/changes/` — `setmeup-core`, `dev-workflow`, `dev-governance` |
 | Project context for artifacts | `openspec/config.yaml` |
-| Project skills (curated) | `.opencode/skills/` — `probe-verify`, `done-checklist`, plus the OpenSpec skills |
+| Project skills (curated) | `.opencode/skills/` — `probe-verify`, `done-checklist`, `pr-review`, plus the OpenSpec skills |
 | CI / enforcement | `.github/workflows/ci.yml` + `.gitleaks/setmeup.toml` |
 | This story | `docs/workflow.md` |
 

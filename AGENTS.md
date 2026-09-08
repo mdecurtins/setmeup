@@ -18,6 +18,19 @@ This is a public repository. It is developed primarily by AI agents, with human 
 - Work follows: explore → change → implement → review. Default to understanding before writing.
 - Explore-first default: use `/opsx-explore` before writing code; ask before guessing. If a task is unclear, pause and ask.
 
+## Issues & labels
+
+- Issues drive changes. Open with `/opsx-propose` only after an issue captures the work; the change's proposal references the issue number.
+- The `github-issues` skill is the entry point for issue-driven work: create issues from templates, apply the label taxonomy, and close issues when their PR merges.
+- Issue → change → PR → merge trace: an issue seeds the change; the change's proposal references the issue; the PR references both the change and the issue; merging the PR closes the issue. No open issues, unarchived changes, or dangling artifacts after a branch merges.
+- Label taxonomy (small, by design):
+  - `bug` — something isn't working
+  - `enhancement` — new feature or capability
+  - `dev-workflow` — development workflow or governance work (templates, CI, process)
+  - `security` — touches the trust boundary (secrets, keys, credentials, git hygiene)
+- A bug that touches the trust boundary is labeled both `bug` and `security`.
+- Branch naming: `feat/<issue-number>-<change-slug>` (e.g. `feat/1-dev-governance`). The branch references the issue that seeds the change.
+
 ## What "done" means
 
 A task or change is complete only when ALL of the following hold:
@@ -32,6 +45,8 @@ Anything declared "done" without this gate is not done.
 ## Global engineering principles (compose, don't duplicate)
 
 The shared engineering principles from `~/.config/opencode/AGENTS.md` apply here as read-only reference: SOLID, YAGNI, testing discipline (everything testable must be tested), idempotency, minimal dependencies, exact version pinning, conventional commits, focused/small commits, and security hygiene. Do not rewrite them here — cite them as governing.
+
+- **Exact dependency pinning:** application dependencies in `Cargo.toml` use exact versions (no `^`/`~` ranges); never use a dependency released less than 7 days ago (supply-chain hygiene). Enforced in review and by the `dev-governance` dependency gate.
 
 ## Repo navigation
 
