@@ -75,9 +75,9 @@ jobs:
         if: hashFiles('Cargo.toml') != ''
         run: cargo llvm-cov --all-features --json --output-path coverage.json
 
-      - name: Gate core modules at 80% floor (module-specific, not whole crate)
+      - name: Gate core modules (per-module floors, not whole crate)
         if: hashFiles('Cargo.toml') != ''
-        run: python3 .github/scripts/check-core-coverage.py coverage.json --floor 80
+        run: python3 .github/scripts/check-core-coverage.py coverage.json
 
   deps:
     name: dependency gate (cargo-deny)

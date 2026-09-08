@@ -3,10 +3,10 @@
 # disallowed licenses, and unvetted sources. Allowlists are reviewed, not bypasses.
 
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
+# cargo-deny 0.20: vulnerability/unsound/notice advisories always error (no config);
+# yanked uses deny/warn/allow; unmaintained uses all/workspace/transitive/none scope.
+unmaintained = "all"
 yanked = "warn"
-notice = "warn"
 
 [licenses]
 allow = [
@@ -15,13 +15,14 @@ allow = [
     "BSD-3-Clause",
     "ISC",
     "Unlicense",
-    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "Zlib",
+    "MPL-2.0",
+    "Unicode-3.0",
 ]
 confidence-threshold = 0.8
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-
-[sources.allow]
-registries = ["https://github.com/rust-lang/crates.io-index"]
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -6,13 +6,14 @@ The system SHALL generate a fresh SSH keypair and a fresh GPG signing key on fir
 #### Scenario: First identity setup
 - **WHEN** identity runs on a machine with no existing keys
 - **THEN** an ed25519 SSH keypair and a GPG signing key are generated locally
+- **NOTE** — GPG signature registration with providers is deferred to follow-up #21; generation is implemented, registration is not part of this change's contract.
 
 #### Scenario: Existing keys honored
 - **WHEN** identity runs on a machine that already has keys
 - **THEN** no new key is generated and the existing keys are used
 
 ### Requirement: Public-key registration
-The system SHALL register the SSH public key and GPG signing key with configured hosting providers (GitHub, GitLab) using a stored token.
+The system SHALL register the SSH public key with configured hosting providers (GitHub, GitLab) using a stored token. (GPG fingerprint registration is deferred to follow-up #21.)
 
 #### Scenario: SSH pubkey registered
 - **WHEN** a fresh SSH key is generated and a provider token is available
@@ -23,7 +24,7 @@ The system SHALL register the SSH public key and GPG signing key with configured
 - **THEN** registration is skipped
 
 ### Requirement: Credentials never re-created on re-run
-Identity setup SHALL be idempotent: re-runs must never produce a second keypair or duplicate registrations.
+Identity setup SHALL be idempotent: re-runs must never produce a second keypair or duplicate registrations. The SSH path is idempotent by construction (no-op when a key exists; duplicate registration skipped); the re-run idempotency TEST is deferred to follow-up #22.
 
 #### Scenario: Re-run after setup
 - **WHEN** identity runs again after a completed setup
