@@ -9,7 +9,9 @@ Usage:
     check-core-coverage.py <coverage-report.json> [--floor 80]
 
 Exit 0 = all core modules at/above floor (or no Cargo project -> not enforced).
-Exit 1 = a core module is below the floor.
+Exit 1 = a core module is below the floor, OR the report has files but none
+         match the configured core modules (fail-closed: the gate must always
+         be exercised once a Cargo project exists).
 """
 import json
 import sys
@@ -44,9 +46,17 @@ def main(argv):
     # cargo-llvm-cov --json emits data[].files[]
     files = report.get("data", [{}])[0].get("files", [])
     matches = list(local_modules(files))
-    if not matches:
-        print("No core module files found in coverage report; nothing to gate.")
-        return 0
+    # Fail-closed: once a Cargo project exists and the report has files,
+    # the gate MUST be exercised. If no core module matched, something is
+    # wrong (module renamed/moved) and passing silently would be a bypass.
+    if not matches and files:
+        print(
+            "ERROR: coverage report has files but none match configured core modules "
+            f"{'/'.join(CORE_MODULES)} (e.g. src/<module>.rs or src/<module>/). "
+            "Failing closed rather than letting the gate bypass silently.",
+            file=sys.stderr,
+        )
+        return 1
 
     failed = [(m, f, p) for (m, f, p) in matches if p < floor]
     for m, f, p in sorted(matches):
