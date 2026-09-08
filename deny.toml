@@ -1,0 +1,27 @@
+# cargo-deny configuration - dependency governance for setmeup
+# Primary gate per dev-governance (quality-gates). Fail-closed on advisories,
+# disallowed licenses, and unvetted sources. Allowlists are reviewed, not bypasses.
+
+[advisories]
+vulnerability = "deny"
+unmaintained = "warn"
+yanked = "warn"
+notice = "warn"
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "ISC",
+    "Unlicense",
+    "CC0-1.0",
+]
+confidence-threshold = 0.8
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+
+[sources.allow]
+registries = ["https://github.com/rust-lang/crates.io-index"]
