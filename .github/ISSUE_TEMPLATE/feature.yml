@@ -1,0 +1,49 @@
+name: Feature request
+description: Request a new capability or enhancement for setmeup
+title: "[feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Every actionable feature issue seeds an OpenSpec change
+        (see `AGENTS.md`) — the proposal will reference this issue number.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What do you want to be able to do? One clear sentence.
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: Why is this needed? What problem does it solve?
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Proposed behavior
+      description: How should it work from the user's perspective?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How will we know this is done?
+      placeholder: |
+        - [ ] Criterion one
+        - [ ] Criterion two
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope (optional)
+      description: What should explicitly NOT be part of this?
+  - type: textarea
+    id: related
+    attributes:
+      label: Related OpenSpec change / issue
+      description: Link any related work.

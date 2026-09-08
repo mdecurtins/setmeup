@@ -1,0 +1,37 @@
+name: Change (spec-driven)
+description: Track work for an OpenSpec change or development workflow item
+title: "[dev-workflow]: "
+labels: [dev-workflow]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Change-tracking issue for the spec-driven workflow. The OpenSpec change
+        under `openspec/changes/` owns the spec/design/tasks; this issue tracks it
+        on GitHub and is referenced by the feature branch and PR.
+  - type: input
+    id: change_name
+    attributes:
+      label: OpenSpec change
+      description: Change name/path under openspec/changes/
+      placeholder: dev-governance
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Work scope
+      description: What needs to be implemented or verified. Reference task groups from the change's tasks.md.
+  - type: checkboxes
+    id: done
+    attributes:
+      label: Done when
+      options:
+        - label: "OpenSpec change tasks complete (done-gate: fmt, clippy, tests, spec scenarios)"
+        - label: Reviewed via PR (checklist review per governance)
+        - label: Change archived; no dangling artifacts remain
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Linked issues, risks, security relevance.
