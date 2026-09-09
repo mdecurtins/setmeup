@@ -1,0 +1,9 @@
+# Governed paths — changes here require review awareness from the maintainer.
+# Single-maintainer repo: ownership is nominal, but these paths surface the
+# owner as a required reviewer so trust-boundary / governance changes get eyes.
+
+.gitleaks/        @mdecurtins
+.github/          @mdecurtins
+AGENTS.md         @mdecurtins
+docs/workflow.md  @mdecurtins
+openspec/         @mdecurtins

@@ -1,0 +1,22 @@
+# Dependabot: monthly cadence, grouped PRs to reduce update noise.
+# npm is intentionally absent — this repo has no package.json.
+
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      rust-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns:
+          - "*"

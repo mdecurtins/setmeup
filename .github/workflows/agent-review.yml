@@ -1,0 +1,54 @@
+name: agent-review
+
+# Adversarial agent review as a required status check (dev-protection D7).
+# A PR cannot merge until this check is green — the exit code IS the gate
+# (approval-equivalent, no review event, no GitHub App).
+#
+# Runs on `pull_request_target` so it executes TRUSTED CODE FROM THE DEFAULT
+# BRANCH, never from the PR head. The PR under review therefore cannot modify
+# this workflow or agent-review.py and cannot reach the secrets they use.
+# This is the fix for the flaw the reviewer itself caught: the prior design
+# (reviewer shipping inside ci.yml on `pull_request`) let a malicious same-repo
+# branch edit the review script and exfiltrate OPENROUTER_API_KEY.
+#
+# Security posture (public repo):
+#   - pull_request_target = trusted base-branch code + elevated secret access.
+#   - Hard fork guard: skip fork PRs entirely. External contributors use the
+#     human review gate instead — a deliberate, documented limitation.
+#   - Check out ONLY the base SHA (never the merge ref or PR head), so the
+#     workflow and agent-review.py executed are the default branch's trusted
+#     copies. All PR evidence (diff, files, artifacts) is read via the GitHub
+#     API, never from the working tree. The PR head SHA is passed explicitly.
+#   - Dormant behind vars.AGENT_REVIEWER_ENABLED == 'true'.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  issues: write # verdict comment on reject
+
+jobs:
+  agent-review:
+    runs-on: ubuntu-latest
+    environment: setmeup_ci
+    if: >-
+      github.event.pull_request.head.repo.fork == false &&
+      !github.event.pull_request.draft &&
+      vars.AGENT_REVIEWER_ENABLED == 'true'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Run adversarial agent review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          AGENT_REVIEWER_MODEL: ${{ vars.AGENT_REVIEWER_MODEL }}
+          AGENT_REVIEW_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 .github/scripts/agent-review.py
