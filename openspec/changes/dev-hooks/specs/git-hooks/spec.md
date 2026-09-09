@@ -4,7 +4,7 @@
 The repository SHALL pin and commit its git hooks in a `git-hooks/` directory and, via the install step, register them as the repository hooks path (`core.hooksPath`), so a fresh clone activates the committed hooks with a single install command instead of manual per-machine setup.
 
 #### Scenario: Fresh clone
-- **WHEN** a contributor clones the repository and runs `scripts/install-hooks.sh` (or `bootstrap.sh` in a dev-clone context)
+- **WHEN** a contributor clones the repository and runs `scripts/install-hooks.sh`
 - **THEN** the clone's `core.hooksPath` points to the committed `git-hooks/` directory
 - **THEN** hooks are active without manual copying into `.git/hooks` or per-machine configuration
 
@@ -61,10 +61,6 @@ The hooks SHALL be installable via `scripts/install-hooks.sh` and SHALL be wired
 - **WHEN** a user runs the `curl | sh` bootstrap (in any directory, including a clone or an unrelated or malicious worktree)
 - **THEN** `scripts/install-hooks.sh` is not invoked and no local file is executed by the bootstrap
 
-#### Scenario: Dev-time install
-- **WHEN** a developer runs the dev-time hook install/verify step
-- **THEN** the hooks are installed and verified active
-
 ## MODIFIED Requirements
 
 ### Requirement: Reviewer-facing workflow documentation
@@ -81,8 +77,6 @@ The repository SHALL include `docs/workflow.md` that explains the AI-driven deve
 #### Scenario: Hooks documented
 - **WHEN** a reviewer reads `docs/workflow.md`
 - **THEN** it describes the local git hooks and how they are installed and kept active
-
-## MODIFIED Requirements
 
 ### Requirement: Contract encodes edit discipline
 The contract SHALL direct that OpenSpec changes are the vehicle for development, and that code is not written before specs exist. **The contract SHALL also record that the local git hooks enforce conventional commits, secret prevention, and the done-gate, so agents and humans alike are held to the same local gates.**
