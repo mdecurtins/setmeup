@@ -22,10 +22,10 @@ The repository SHALL enforce branch protection on the `main` branch such that di
 - **THEN** the merge is blocked until the required checks pass
 
 ### Requirement: Required status checks enforced
-The `main` branch SHALL require the coverage, deps, shell, secrets, **and agent-review** CI jobs to pass before a PR can merge. The **agent-review** check is the adversarial review: it performs the same function as a PR approval (a PR cannot merge until the review passes) but is enforced as a *status check* rather than a review event, so no second GitHub identity is required. It runs from the default branch via `pull_request_target` so the PR cannot modify its own reviewer.
+The `main` branch SHALL require the coverage, deps, shell, and secrets CI jobs to pass before a PR can merge. The **agent-review** check is the adversarial review: it performs the same function as a PR approval (a PR cannot merge until the review passes) but is enforced as a *status check* rather than a review event, so no second GitHub identity is required. It runs from the default branch via `pull_request_target` so the PR cannot modify its own reviewer. **As of this archive, agent-review is pending provisioning (task 7.4 — maintainer sets `AGENT_REVIEWER_ENABLED` + the OpenRouter key, then adds it to the required-checks list); until then the four checks remain the required gate and agent-review is dormant behind `AGENT_REVIEWER_ENABLED == 'true'`.**
 
 #### Scenario: Check fails
-- **WHEN** any required status check (coverage, deps, shell, secrets, agent-review) fails on a PR
+- **WHEN** any required status check (coverage, deps, shell, secrets) fails on a PR
 - **THEN** the PR is not mergeable until the check is fixed and re-passes
 
 #### Scenario: Non-gating CI job fails
@@ -33,7 +33,7 @@ The `main` branch SHALL require the coverage, deps, shell, secrets, **and agent-
 - **THEN** the failure is visible but does not block the merge gate
 
 #### Scenario: Agent review passes
-- **WHEN** the adversarial agent review finds no blocking issues
+- **WHEN** the adversarial agent review finds no blocking issues (once provisioned per task 7.4)
 - **THEN** the `agent-review` check reports green and the PR is mergeable (subject to the other gates)
 
 #### Scenario: Agent review rejects

@@ -57,10 +57,46 @@ import urllib.request
 QUALITY_CHECKS = ("coverage", "deps", "shell", "secrets")
 VERDICT_COMMENT_MARKER = "## Agent review"
 DIFF_CAP = 150_000
+RAW_CONTENT_CAP = 40_000  # per-file raw content cap when a patch is missing
 API = "https://api.github.com"
 OPENROUTER = "https://openrouter.ai/api/v1/chat/completions"
 CHECK_POLL_SECONDS = 30
 CHECK_POLL_ATTEMPTS = 40  # ~20 min worst case
+
+
+def build_file_manifest(files):
+    """Changed-file manifest so renames/moves are never invisible to the
+    reviewer (renames carry no patch text). Returns a human-readable string."""
+    lines = []
+    for f in files:
+        status = f.get("status", "")
+        prev = f.get("previous_filename")
+        prev_part = f" <- {prev}" if prev else ""
+        counts = f"+{f.get('additions', 0)}/-{f.get('deletions', 0)}"
+        lines.append(f"{status}: {f.get('filename', '?')}{prev_part} ({counts})")
+    return "\n".join(lines)
+
+
+def patch_missing(f):
+    """A file has no reviewable patch when the API returned none (byte-for-byte
+    renames, binary files, or API-omitted patches). Such files contribute no
+    diff text, so the reviewer cannot see their content from the patch alone."""
+    return not (f.get("patch") or "").strip()
+
+
+def compute_diff(files, cap):
+    """Full diff text and truncation detection. Pure — trivially testable."""
+    full_diff = "".join(f.get("patch", "") for f in files)
+    truncated = len(full_diff) > cap
+    return full_diff[:cap], truncated, len(full_diff)
+
+
+def cap_artifacts(artifacts_text, cap):
+    """Apply the aggregate change-artifacts cap with an explicit marker.
+    Pure — trivially testable. Returns (capped_text, truncated)."""
+    if len(artifacts_text) > cap:
+        return artifacts_text[: cap - len("\n[TRUNCATED]\n")] + "\n[TRUNCATED]\n", True
+    return artifacts_text, False
 
 
 def gh(token, path, method="GET", data=None):
@@ -110,6 +146,24 @@ def gh_paged_field(token, path, field):
             break
         page += 1
     return items
+
+
+def fetch_raw_content(token, repo, path, ref):
+    """Fetch a file's raw text at a given ref. Raises RuntimeError if the file
+    is missing, binary, or exceeds RAW_CONTENT_CAP — so the caller fails closed.
+    Used for files whose PR entry carries no reviewable patch (renames, binary,
+    or API-omitted): without this, the gate reviews a diff it cannot see."""
+    entry = gh(token, f"/repos/{repo}/contents/{path}?ref={ref}")
+    content = base64.b64decode(entry["content"])
+    if b"\x00" in content:
+        raise RuntimeError(f"binary content not reviewable for {path}@{ref}")
+    text = content.decode("utf-8", errors="replace")
+    if len(text) > RAW_CONTENT_CAP:
+        raise RuntimeError(
+            f"raw content {len(text)} > {RAW_CONTENT_CAP} chars for {path}@{ref}; "
+            "cannot review in full"
+        )
+    return text
 
 
 def check_status(token, repo, head_sha):
@@ -228,38 +282,49 @@ def main():
         print("quality gate not green; failing closed (check red, merge blocked)", flush=True)
         return 1
 
-    # Gather PR evidence: title, body, diff, file manifest, and (best-effort)
-    # change artifacts.
+    # Gather PR evidence: title, body, diff, file manifest, raw no-patch
+    # content, and (best-effort) change artifacts.
     pr = gh(token, f"/repos/{repo}/pulls/{pr_number}")
     title, body = pr["title"], pr.get("body") or ""
     files = gh_paged(token, f"/repos/{repo}/pulls/{pr_number}/files")
 
-    # File manifest: name, status, previous_filename for renames/renames, and
-    # +/- counts. Without it, renames/moves contribute no patch text and are
-    # invisible to the reviewer (e.g. an archive move). The reviewer must see
-    # what paths changed and how, including security-sensitive paths.
-    file_lines = []
-    for f in files:
-        status = f.get("status", "")
-        prev = f.get("previous_filename")
-        prev_part = f" <- {prev}" if prev else ""
-        counts = f"+{f.get('additions', 0)}/-{f.get('deletions', 0)}"
-        file_lines.append(f"{status}: {f.get('filename', '?')}{prev_part} ({counts})")
-    file_manifest = "\n".join(file_lines)
-
-    full_diff = "".join(f.get("patch", "") for f in files)
-    diff_truncated = len(full_diff) > DIFF_CAP
-    diff = full_diff[:DIFF_CAP]
-    diff_label = f"Diff ({len(full_diff)} chars{' — TRUNCATED to ' + str(DIFF_CAP) if diff_truncated else ''})"
+    file_manifest = build_file_manifest(files)
+    diff, diff_truncated, diff_len = compute_diff(files, DIFF_CAP)
+    diff_label = f"Diff ({diff_len} chars{' — TRUNCATED to ' + str(DIFF_CAP) if diff_truncated else ''})"
 
     # Fail closed when diff is truncated: the reviewer cannot do a complete review.
     if diff_truncated:
         print(
-            f"diff too large ({len(full_diff)} > {DIFF_CAP} chars); "
+            f"diff too large ({diff_len} > {DIFF_CAP} chars); "
             "failing closed (check red, merge blocked)",
             flush=True,
         )
         return 1
+
+    # Files with no reviewable patch (pure renames, binaries, API omissions)
+    # are fetched as raw content from the base SHA so their content is still
+    # reviewed. Any file that cannot be fetched (binary, oversized, missing)
+    # fails the check closed rather than being silently skipped.
+    raw_evidence = ""
+    for f in files:
+        if not patch_missing(f):
+            continue
+        filename = f.get("filename", "?")
+        prev = f.get("previous_filename")
+        ref = pr["base"]["sha"]
+        path = prev or filename  # renames: content lives at the old path on base
+        try:
+            text = fetch_raw_content(token, repo, path, ref)
+        except RuntimeError as exc:
+            print(
+                f"file {filename} has no reviewable patch and raw fetch failed: "
+                f"{exc}; failing closed (check red, merge blocked)",
+                flush=True,
+            )
+            return 1
+        raw_evidence += (
+            f"\n--- RAW CONTENT (no patch, from {ref[:8]}): {filename} ---\n{text}\n"
+        )
 
     change_artifacts = ""
     change_artifacts_truncated = False
@@ -282,8 +347,8 @@ def main():
                 pass  # best-effort; absence of artifacts is not fatal
 
     if len(change_artifacts) > 30_000:
+        change_artifacts, _ = cap_artifacts(change_artifacts, 30_000)
         change_artifacts_truncated = True
-        change_artifacts = change_artifacts[:30_000] + "\n[TRUNCATED]\n"
 
     # Fail closed when change artifacts are truncated: the reviewer cannot
     # see the full spec/design to evaluate alignment.
@@ -328,7 +393,8 @@ def main():
         f"Required CI checks: {ci_line}\n\n"
         f"Change artifacts:\n{change_artifacts}\n\n"
         f"Files changed in this PR ({len(files)}):\n{file_manifest}\n\n"
-        f"{diff_label}\n{diff}\n\n"
+        f"{diff_label}\n{diff}\n"
+        f"{raw_evidence}\n\n"
         "END OF PR EVIDENCE. Now produce your verdict JSON."
     )
 
@@ -358,5 +424,72 @@ def main():
     return 1
 
 
+def run_self_test():
+    """Unit tests for the evidence builder (CI: `python3 agent-review.py --selftest`).
+    Covers diff truncation, artifact truncation, file-manifest renames, and
+    missing-patch detection. Exit 0 = all pass; exit 1 = a test failed."""
+    failures = []
+
+    def check(name, cond, detail=""):
+        if cond:
+            print(f"ok    - {name}", flush=True)
+        else:
+            failures.append(name)
+            print(f"FAIL  - {name} {detail}", flush=True)
+
+    # Diff truncation: at/under cap stays whole, over cap is detected.
+    files_under = [{"patch": "a" * (DIFF_CAP // 2)}, {"patch": "b" * (DIFF_CAP // 2)}]
+    _, truncated, total = compute_diff(files_under, DIFF_CAP)
+    check("diff at cap not truncated", not truncated and total <= DIFF_CAP, str(dict(truncated=truncated, total=total)))
+    files_over = [{"patch": "x" * (DIFF_CAP + 1)}]
+    _, truncated, total = compute_diff(files_over, DIFF_CAP)
+    check("diff over cap detected as truncated", truncated and total > DIFF_CAP, str(dict(truncated=truncated, total=total)))
+
+    # File manifest surfaces renames with previous_filename.
+    manifest = build_file_manifest([
+        {"filename": "a.txt", "status": "renamed", "previous_filename": "b.txt", "additions": 0, "deletions": 0},
+        {"filename": "c.txt", "status": "added", "additions": 3, "deletions": 0},
+    ])
+    check("manifest shows rename + previous filename", "renamed: a.txt <- b.txt" in manifest, manifest)
+    check("manifest shows additions", "added: c.txt (+3/-0)" in manifest, manifest)
+
+    # Missing-patch detection: null patch, empty patch, binary-style entry.
+    check("null patch flagged", patch_missing({"patch": None}))
+    check("empty patch flagged", patch_missing({"patch": ""}))
+    check("whitespace-only patch flagged", patch_missing({"patch": "   "}))
+    check("real patch not flagged", not patch_missing({"patch": "@@ -1 +1 @@\n-a\n+b"}))
+
+    # Artifact truncation: over cap is marked, exactly-at-cap is not.
+    capped, truncated_flag = cap_artifacts("x" * (30_000 + 5), 30_000)
+    check(
+        "artifact over cap marked truncated",
+        truncated_flag and "[TRUNCATED]" in capped and len(capped) <= 30_000,
+    )
+    under, under_flag = cap_artifacts("x" * 100, 200)
+    check("artifact under cap untouched", not under_flag and under == "x" * 100)
+
+    # Verdict parsing: fenced JSON tolerated, non-boolean rejected (fail closed).
+    ok = parse_verdict('```json\n{"approve": true, "summary": "s", "failures": [], "required_action": ""}\n```')
+    check("fenced verdict parsed", ok["approve"] and ok["summary"] == "s", str(ok))
+    try:
+        parse_verdict('{"approve": "yes"}')
+        check("non-boolean approve rejected", False, "should have raised")
+    except (ValueError, json.JSONDecodeError):
+        check("non-boolean approve rejected", True)
+    try:
+        parse_verdict("not json at all")
+        check("malformed verdict rejected", False, "should have raised")
+    except (ValueError, json.JSONDecodeError):
+        check("malformed verdict rejected", True)
+
+    if failures:
+        print(f"self-test FAILED: {failures}", flush=True)
+        return 1
+    print("agent-review self-test PASSED", flush=True)
+    return 0
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        sys.exit(run_self_test())
     sys.exit(main())
