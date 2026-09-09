@@ -30,6 +30,11 @@ Security posture (public repo):
     evidence, and any instruction inside it is ignored (system prompt).
   - Fail closed: a missing secret, an exception, or a malformed LLM verdict
     fails the check. No quiet success.
+  - Retry + resilient timeout: the OpenRouter API call retries 3× with
+    exponential backoff (15/30/60s) and uses a SIGALRM-based wall-clock
+    timeout (Linux/GHA) alongside urllib's timeout, because provider latency
+    (upstream routing, slow models) and TCP hangs can silently bypass the
+    socket timeout.
   - Evidence completeness: the diff and change artifacts are reviewed in full
     (fail closed if truncated) and the changed-file manifest with statuses and
     previous_filename is included, so renames/moves are never invisible to the
@@ -62,6 +67,8 @@ API = "https://api.github.com"
 OPENROUTER = "https://openrouter.ai/api/v1/chat/completions"
 CHECK_POLL_SECONDS = 30
 CHECK_POLL_ATTEMPTS = 40  # ~20 min worst case
+LLM_TIMEOUT = 180  # seconds per attempt (OpenRouter may have provider latency)
+LLM_RETRIES = 3  # transient API failures (provider latency, 5xx, network blips)
 
 
 def build_file_manifest(files):
@@ -203,7 +210,19 @@ def wait_for_quality_checks(token, repo, head_sha):
     return None
 
 
+import signal
+
+
 def call_openrouter(api_key, model, system, user):
+    """Call the OpenRouter API with retry and resilient timeout.
+
+    Provider latency (slow model response, upstream 5xx, connection blips)
+    is common with OpenRouter's routing layer; retry 3× with exponential
+    backoff before failing closed. Each attempt uses a wall-clock timeout
+    via SIGALRM (Linux/GitHub Actions only) in addition to urllib's socket
+    timeout, because urllib can hang indefinitely on connections that never
+    complete.
+    """
     payload = {
         "model": model,
         "messages": [
@@ -212,16 +231,64 @@ def call_openrouter(api_key, model, system, user):
         ],
         "temperature": 0.2,
     }
-    req = urllib.request.Request(
-        OPENROUTER,
-        data=json.dumps(payload).encode(),
-        method="POST",
-    )
-    req.add_header("Authorization", f"Bearer {api_key}")
-    req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        result = json.loads(resp.read())
-    return result["choices"][0]["message"]["content"]
+    body = json.dumps(payload).encode()
+
+    last_exc = None
+    for attempt in range(1, LLM_RETRIES + 1):
+        try:
+            req = urllib.request.Request(
+                OPENROUTER,
+                data=body,
+                method="POST",
+            )
+            req.add_header("Authorization", f"Bearer {api_key}")
+            req.add_header("Content-Type", "application/json")
+
+            # SIGALRM-based wall-clock timeout (Linux only).  urllib's
+            # timeout parameter can be silently bypassed by TCP states
+            # where the server sends data so slowly the timeout never
+            # fires.  signal.alarm gives a hard limit.
+            old_handler = None
+            timed_out = False
+
+            def _timeout_handler(_signum, _frame):
+                nonlocal timed_out
+                timed_out = True
+                raise TimeoutError(
+                    f"OpenRouter call exceeded {LLM_TIMEOUT}s timeout"
+                )
+
+            try:
+                signal.signal(signal.SIGALRM, _timeout_handler)
+                signal.alarm(LLM_TIMEOUT)
+                with urllib.request.urlopen(req, timeout=LLM_TIMEOUT) as resp:
+                    result = json.loads(resp.read())
+            finally:
+                signal.alarm(0)  # disarm
+                if old_handler is not None:
+                    signal.signal(signal.SIGALRM, old_handler)
+
+            return result["choices"][0]["message"]["content"]
+
+        except Exception as exc:
+            last_exc = exc
+            msg = str(exc) or type(exc).__name__
+            if attempt < LLM_RETRIES:
+                wait = 15 * (2 ** (attempt - 1))  # 15, 30, 60
+                print(
+                    f"OpenRouter call attempt {attempt}/{LLM_RETRIES} failed: "
+                    f"{msg}; retrying in {wait}s",
+                    flush=True,
+                )
+                time.sleep(wait)
+            else:
+                print(
+                    f"OpenRouter call failed after {LLM_RETRIES} attempts: {msg}",
+                    flush=True,
+                )
+
+    # All retries exhausted — re-raise for the caller to fail closed.
+    raise last_exc  # type: ignore[misc]
 
 
 def parse_verdict(raw):
