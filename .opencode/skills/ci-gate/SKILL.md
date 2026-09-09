@@ -28,21 +28,21 @@ Every item is specific: the rejection pattern that actually happened, the verifi
 - **Fix:** state the claim once, consistently; delete duplicated sections; if a design decision changes a requirement, update all artifacts together in the same change.
 
 ### 3. Truthful mechanism claims
-**Rejections (#30, #33):** agent-review was overclaimed as "enforced" when the gate is advisory, and "zero-step activation" promised no manual setup for per-clone config values. The gate checks mechanism claims against what the code/diff actually does.
+**Rejections (#30, #33):** the agent-review gate was overclaimed as "enforced" while it still shipped dormant behind a feature flag, and "zero-step activation" promised no manual setup for per-clone config values. The gate checks mechanism claims against what the code/diff actually does today — a claim must hold at the base ref, not at some future state.
 
 - **Check:** for every "automatic / zero-step / seamless / enforced" claim, find the code path that makes it true: `grep -rn "zero\|automatic\|seamless\|enforced" openspec/changes/<slug>/`
-- **Fix:** claim only what the mechanism delivers. If a value is per-clone config, say "each clone must set X in Y"; if a gate is advisory, say so — never write "enforced".
+- **Fix:** claim only what the mechanism delivers. If a value is per-clone config, say "each clone must set X in Y"; if a mechanism is gated behind a flag or not yet wired in, say exactly that — do not write "enforced" for something that is not live at the reviewed SHA.
 
 ### 4. Delivery-path trust boundary
 **Rejection (#33):** the `curl | sh` bootstrap could execute local CWD files or run `install-hooks.sh` — a public-repo trust-boundary flaw. The gate scrutinizes anything that pipes remote code into a shell.
 
-- **Check:** inspect every bootstrap/hook script the change touches: `grep -rn "curl\|install-hooks.sh\|source \./\|\. ./" <changed files>`. The piped script must not execute files from the CWD, must not run `install-hooks.sh`, and must reference explicit, pinned paths only.
+- **Check:** inspect every bootstrap/hook script the change touches: `grep -rn "curl\|install-hooks\.sh\|source \./\|\. \./" <changed files>`. The piped script must not execute files from the CWD, must not run `install-hooks.sh`, and must reference explicit, pinned paths only.
 - **Fix:** make the bootstrap self-contained; fetch only explicit URLs; never source or execute local files as part of the pipe.
 
 ### 5. Evidence completeness + scope hygiene
 **Rejections (#30, #33):** an archive was a copy, not a move (git saw no rename); archive/spec-sync PRs carried out-of-scope changes; a rename left stale `bootstrap-dev-clone` references. The gate reviews the file manifest with statuses and previous filenames — renames/moves are never invisible.
 
-- **Check:** list what the PR actually changes and confirm renames are real moves with all references updated: `git diff HEAD^ --name-status` (full scope), `git diff HEAD^ --name-status --diff-filter=R` (renames), then `grep -rn "<old name>" .` for stale references
+- **Check:** list what the PR actually changes and confirm renames are real moves with all references updated: `git diff $(git merge-base HEAD main) --name-status` (full scope), `git diff $(git merge-base HEAD main) --name-status --diff-filter=R` (renames), then `grep -rn "<old name>" .` for stale references
 - **Fix:** use `git mv` for moves and propagate the new path to every reference; keep archive/spec-sync PRs strictly to their stated scope.
 
 ## Source material
