@@ -2,26 +2,27 @@
 
 - [ ] 1.1 Add `git-hooks/` with `commit-msg`, `pre-commit`, `pre-push` as plain shell scripts, plus `git-hooks/README.md` describing each hook
 - [ ] 1.2 `commit-msg`: validate Conventional Commits (allowed types `feat|fix|chore|docs|refactor|test`, optional scope, reject non-conforming messages with a hint)
-- [ ] 1.3 `pre-commit`: scan staged content for secret-like patterns using gitleaks with `.gitleaks/setmeup.toml`; fail closed when gitleaks is available, warn+continue if it isn't (CI remains the hard gate)
+- [ ] 1.3 `pre-commit`: scan staged content for secret-like patterns using gitleaks with `.gitleaks/setmeup.toml`; fail closed when gitleaks is unavailable (block the commit and print install instructions) — the local prevention loop is real, not advisory
 - [ ] 1.4 `pre-push`: run done-gate preflight — `cargo fmt --check`, `clippy --all-targets --all-features -- -D warnings`, `cargo test` — only when `Cargo.toml` exists (mirror CI's `hashFiles` guard)
-- [ ] 1.5 Make hooks executable and register `core.hooksPath=git-hooks/` in the repo config
+- [ ] 1.5 Make hooks executable and register `core.hooksPath=git-hooks/` in the local clone config (via the install script; not committed)
 
 ## 2. Install + verify script
 
-- [ ] 2.1 Add `scripts/install-hooks.sh`: idempotent install of `core.hooksPath`, prints active state, exits non-zero if a hook is missing
+- [ ] 2.1 Add `scripts/install-hooks.sh`: idempotent install of `core.hooksPath`, checks gitleaks availability and prints install instructions if absent, prints active state, exits non-zero if a hook is missing
 - [ ] 2.2 Add `scripts/verify-hooks.sh`: checks hooks exist, are executable, and `core.hooksPath` is set correctly
 - [ ] 2.3 Verify idempotency: run install twice, confirm no mutation and correct state both times
 
 ## 3. Bootstrap + dev-time wiring
 
-- [ ] 3.1 Wire `bootstrap.sh` to run `scripts/install-hooks.sh` only when a repo clone (development context) is detected — never in the `curl | sh` delivery path
+- [ ] 3.1 Wire `bootstrap.sh` to run `scripts/install-hooks.sh` ONLY when the working directory is positively identified as the setmeup repo (git worktree AND `git remote get-url origin` matches `github.com/mdecurtins/setmeup` AND a setmeup marker file exists) — never in the `curl | sh` delivery path and never in unrelated Git worktrees
 - [ ] 3.2 Add a dev-time install/verify check (e.g. in `AGENTS.md` workflow / a `make`-style convenience) so development always keeps hooks active
 - [ ] 3.3 Probe-verify: fresh-clone simulation + one install step activates hooks with no per-machine manual setup; delivery-path bootstrap does NOT install hooks
+- [ ] 3.4 Probe-verify (adversary): run the `curl | sh` bootstrap inside an unrelated existing Git worktree → the setmeup detection (remote URL / marker mismatch) prevents any change to that worktree's hooks
 
 ## 4. Behavior verification (negative tests)
 
 - [ ] 4.1 Attempt a non-conventional commit message → rejected at `commit-msg` with a format hint
-- [ ] 4.2 Stage a secret-like string (e.g. a test `sk-…` token) with gitleaks installed → rejected at `pre-commit`; with gitleaks absent → warning + continue (CI remains the hard gate)
+- [ ] 4.2 Stage a secret-like string (e.g. a test `sk-…` token) → rejected at `pre-commit`; with gitleaks absent → commit blocked with install instructions (fail closed)
 - [ ] 4.3 Push a branch with a deliberate fmt/clippy/test failure → blocked at `pre-push` with the failing gate reported
 - [ ] 4.4 Valid conventional commit + clean gate → accepted end-to-end
 

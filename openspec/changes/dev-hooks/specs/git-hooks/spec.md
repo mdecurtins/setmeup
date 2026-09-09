@@ -24,16 +24,16 @@ The commit-msg hook SHALL enforce Conventional Commits with an optional scope an
 - **THEN** the commit is accepted
 
 ### Requirement: Secret prevention at staging time
-The pre-commit hook SHALL scan staged content for secret-like patterns and reject the commit if a match is found, so a secret never enters history. **The scan uses gitleaks when it is available; when gitleaks is not installed the hook SHALL warn (fail-open) and continue, because the CI secrets check remains the hard gate.**
+The pre-commit hook SHALL scan staged content for secret-like patterns and reject the commit if a match is found, so a secret never enters history. **The scan runs gitleaks against `.gitleaks/setmeup.toml`; if gitleaks is not installed the hook SHALL block the commit with install instructions (fail closed), because the prevention loop must be real — push-time CI detection is too late once a secret is in history.**
 
-#### Scenario: Secret-like string staged (gitleaks available)
+#### Scenario: Secret-like string staged
 - **WHEN** gitleaks is available and a contributor stages a diff containing a string matching a known secret pattern (e.g., an API key, `sk-`, token-like)
 - **THEN** the pre-commit hook fails and the commit is blocked
 
-#### Scenario: Secret-like string staged (gitleaks unavailable)
-- **WHEN** gitleaks is not installed and a contributor stages content that may contain secret-like patterns
-- **THEN** the pre-commit hook prints a warning that local secret prevention is inactive
-- **THEN** the commit proceeds (CI's secrets check is the hard gate)
+#### Scenario: gitleaks unavailable
+- **WHEN** gitleaks is not installed and a contributor attempts a commit
+- **THEN** the pre-commit hook blocks the commit and prints install instructions (fail closed)
+- **THEN** the contributing developer installs gitleaks (from the printed one-liner) and retries the commit
 
 #### Scenario: Clean staged content
 - **WHEN** a contributor stages a diff with no secret-like pattern
@@ -51,11 +51,15 @@ The pre-push hook SHALL run the done-gate preflight before allowing a push, at m
 - **THEN** the push proceeds
 
 ### Requirement: Hook installation wiring
-The hooks SHALL be installable via `scripts/install-hooks.sh` and SHALL be wired into both `bootstrap.sh` (fresh machine) and a dev-time install/verify path, so hooks are present on first setup and kept in place during development.
+The hooks SHALL be installable via `scripts/install-hooks.sh` and SHALL be wired into both `bootstrap.sh` (setmeup development-clone context only) and a dev-time install/verify path, so hooks are present on first setup and kept in place during development.
 
 #### Scenario: Bootstrap bootstraps hooks
-- **WHEN** a user runs `bootstrap.sh` on a fresh machine
+- **WHEN** a user runs `bootstrap.sh` in a positively identified setmeup development clone
 - **THEN** `scripts/install-hooks.sh` is invoked and the hooks are active
+
+#### Scenario: Delivery-path bootstrap leaves hooks alone
+- **WHEN** a user runs the `curl | sh` bootstrap outside the setmeup repository (bare machine or unrelated git worktree)
+- **THEN** `scripts/install-hooks.sh` is NOT invoked and no hooks are changed in the running directory
 
 #### Scenario: Dev-time install
 - **WHEN** a developer runs the dev-time hook install/verify step

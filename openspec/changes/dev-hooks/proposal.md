@@ -6,9 +6,9 @@ Zero git hooks exist in the repo or on this machine. Fresh clones get none (per-
 
 - Add a committed `git-hooks/` directory with hooks, activated per-clone via `core.hooksPath` so hooks are versioned and shared
 - `commit-msg`: enforce Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:` with optional scope)
-- `pre-commit`: reject staged secret-like content (gitleaks scan when available; warn and continue when gitleaks is absent, matching CI as the hard gate) before it can enter history
+- `pre-commit`: reject staged secret-like content before it enters history — gitleaks scan against `.gitleaks/setmeup.toml`, fail closed (block with install instructions) when gitleaks is absent
 - `pre-push`: run the done-gate preflight (fmt, clippy `-D warnings`, tests when a crate is present) before a push
-- Add `scripts/install-hooks.sh` — wired into `bootstrap.sh` (development-clone context only) and a dev-time install/verify check
+- Add `scripts/install-hooks.sh` — wired into `bootstrap.sh` (development-clone context only, gated on positive setmeup-repo identification) and a dev-time install/verify check
 - Document the hooks in `AGENTS.md` and `docs/workflow.md`
 
 ## Capabilities
