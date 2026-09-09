@@ -52,6 +52,17 @@ The policy layer lives in the `dev-governance` change (archived spec: `openspec/
 - **Archive is the terminal step.** A change is archived as the *final commit* for its branch — only after the done-gate, review, and verification of the tagged issue(s) all pass. The archive syncs the change's delta specs into main specs and moves the change to `openspec/changes/archive/`.
 - **No dangling artifacts.** After a branch merges: no open issues referenced by the merged change, no unarchived completed changes, no open changes whose work shipped. Everything closes; nothing is left in a half state.
 
+### Mechanically enforced gates (dev-protection)
+
+The gates above are not just policy — they are enforced GitHub-side (`dev-protection`, issue #25):
+
+- **Branch protection on `main`** (`gh api`: classic protection). Direct pushes, force-pushes, and merges that have not passed the required checks are rejected by the server. Required status checks are exactly **coverage**, **deps**, **shell**, **secrets** (and **agent-review**, once enabled); the branch must be up to date before merge; admins are subject to the same gate (`enforce_admins`).
+- **Squash-only merges.** Repo settings have merge and rebase commits disabled; every merge on `main` produces one focused commit (the durable evidence of the process). Merged branches auto-delete.
+- **SHA-pinned actions.** Every `uses:` in `.github/workflows/ci.yml` is pinned to a commit SHA with the original tag kept as a trailing comment — mutable tags are a supply-chain risk in a public repo. Dependabot proposes updates for these pins.
+- **CODEOWNERS.** `.github/CODEOWNERS` assigns the maintainer to trust-boundary and governance paths (`.gitleaks/`, `.github/`, `AGENTS.md`, `docs/workflow.md`, `openspec/`), so changes there surface a reviewer. This is a *signal* (a personal-repo code owner is the author, so mechanically requiring it would deadlock).
+- **Dependabot.** Monthly cadence for `cargo` and `github-actions` (no npm — no `package.json`), grouped into single PRs per ecosystem to reduce noise.
+- **Agent review (approval-equivalent gate).** The `agent-review` job in `.github/workflows/ci.yml` + `.github/scripts/agent-review.py` run the **adversarial agent review** as a required status check: it reads the PR diff and OpenSpec change artifacts and has an LLM review them against the checklist, then reports a green/red check. The check's exit code IS the merge gate — functionally an approval, without a review event. It runs after the four quality checks (`needs`) and only on `pull_request` with a fork guard (fork PRs never see the elevated `OPENROUTER_API_KEY`, scoped to the `setmeup_ci` environment) and is fail-closed (no green quality checks / missing key / malformed verdict ⇒ red). It is dormant behind `vars.AGENT_REVIEWER_ENABLED`; once the maintainer provisions the key and observes a live pass, `agent-review` is added to the required checks (`tasks.md` 7.4 of dev-protection). No GitHub App or second identity is involved. Honest caveat: the checklist is automated, so the substantive review remains the process gate (`pr-review` skill).
+
 ## The pieces, and where they live
 
 | Concern | Location |
@@ -60,7 +71,7 @@ The policy layer lives in the `dev-governance` change (archived spec: `openspec/
 | OpenSpec changes | `openspec/changes/` — `setmeup-core`, `dev-workflow`, `dev-governance` |
 | Project context for artifacts | `openspec/config.yaml` |
 | Project skills (curated) | `.opencode/skills/` — `probe-verify`, `done-checklist`, `pr-review`, plus the OpenSpec skills |
-| CI / enforcement | `.github/workflows/ci.yml` + `.gitleaks/setmeup.toml` |
+| CI / enforcement | `.github/workflows/ci.yml` + `.gitleaks/setmeup.toml`; enforced via branch protection, squash-only settings, CODEOWNERS (`.github/CODEOWNERS`), Dependabot (`.github/dependabot.yml`) |
 | This story | `docs/workflow.md` |
 
 ## Conventions honored by reference

@@ -29,14 +29,14 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust toolchain (pinned via rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Enforce formatting
         if: hashFiles('Cargo.toml') != ''
@@ -56,20 +56,19 @@ jobs:
           test -f rust-toolchain.toml
 
   coverage:
-    name: core-module coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust toolchain with llvm-tools
         if: hashFiles('Cargo.toml') != ''
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: llvm-tools-preview
 
       - name: Install cargo-llvm-cov
         if: hashFiles('Cargo.toml') != ''
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@4005ba9a372944291571d98926b7bf5016bf6c56 # cargo-llvm-cov
 
       - name: Collect coverage
         if: hashFiles('Cargo.toml') != ''
@@ -80,24 +79,22 @@ jobs:
         run: python3 .github/scripts/check-core-coverage.py coverage.json
 
   deps:
-    name: dependency gate (cargo-deny)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install cargo-deny
         if: hashFiles('Cargo.toml') != ''
-        uses: taiki-e/install-action@cargo-deny
+        uses: taiki-e/install-action@f1dd293276342cf06b423f44b1c7c9312a2d2ecb # cargo-deny
 
       - name: Run cargo deny (advisories, licenses, sources)
         if: hashFiles('Cargo.toml') != ''
         run: cargo deny check
 
   shell:
-    name: shell gate (shellcheck + shfmt)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install shellcheck and shfmt
         run: |
@@ -131,17 +128,49 @@ jobs:
           printf '%s\n' "${{ steps.find-shell.outputs.FILES }}" | xargs shfmt -d
 
   secrets:
-    name: secret scan (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
       - name: Scan for leaked secrets
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks/setmeup.toml
         # Fail closed: any secret-like pattern in tracked content blocks the change.
         # Legitimate false positives are allowlisted in .gitleaks/setmeup.toml (reviewed).
+
+  # Adversarial agent review (dev-protection D7): the approval-equivalent gate.
+  # Runs ONLY after the four quality checks settle (needs) so it cannot race
+  # them — GitHub schedules this after coverage/deps/shell/secrets finish. The
+  # check's exit code IS the merge gate (green = review passed, red = blocked).
+  # Pull-request-only (push-to-main has no PR event); fork-guarded; dormant
+  # behind AGENT_REVIEWER_ENABLED; uses the setmeup_ci environment for the one
+  # secret (OPENROUTER_API_KEY). No GitHub App is involved.
+  agent-review:
+    runs-on: ubuntu-latest
+    needs: [coverage, deps, shell, secrets]
+    environment: setmeup_ci
+    permissions:
+      contents: read
+      issues: write # verdict comment (issue comment) when the review rejects
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.fork == false &&
+      !github.event.pull_request.draft &&
+      vars.AGENT_REVIEWER_ENABLED == 'true'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Run adversarial agent review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          AGENT_REVIEWER_MODEL: ${{ vars.AGENT_REVIEWER_MODEL }}
+        run: python3 .github/scripts/agent-review.py
