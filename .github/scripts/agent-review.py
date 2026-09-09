@@ -244,33 +244,35 @@ def call_openrouter(api_key, model, system, user):
             req.add_header("Authorization", f"Bearer {api_key}")
             req.add_header("Content-Type", "application/json")
 
-            # SIGALRM-based wall-clock timeout (Linux only).  urllib's
+            # SIGALRM-based wall-clock timeout (Linux/GHA only).  urllib's
             # timeout parameter can be silently bypassed by TCP states
             # where the server sends data so slowly the timeout never
             # fires.  signal.alarm gives a hard limit.
-            old_handler = None
-            timed_out = False
+            # Guard against platforms without SIGALRM (Windows, etc.).
+            use_alarm = hasattr(signal, "SIGALRM")
 
             def _timeout_handler(_signum, _frame):
-                nonlocal timed_out
-                timed_out = True
                 raise TimeoutError(
                     f"OpenRouter call exceeded {LLM_TIMEOUT}s timeout"
                 )
 
-            try:
-                signal.signal(signal.SIGALRM, _timeout_handler)
+            if use_alarm:
+                old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
                 signal.alarm(LLM_TIMEOUT)
+            else:
+                old_handler = None
+            try:
                 with urllib.request.urlopen(req, timeout=LLM_TIMEOUT) as resp:
                     result = json.loads(resp.read())
             finally:
-                signal.alarm(0)  # disarm
-                if old_handler is not None:
+                if use_alarm:
+                    signal.alarm(0)  # disarm
                     signal.signal(signal.SIGALRM, old_handler)
 
             return result["choices"][0]["message"]["content"]
 
-        except Exception as exc:
+        except (urllib.error.HTTPError, urllib.error.URLError,
+                TimeoutError, OSError) as exc:
             last_exc = exc
             msg = str(exc) or type(exc).__name__
             if attempt < LLM_RETRIES:
