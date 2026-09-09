@@ -228,9 +228,23 @@ def main():
     pr = gh(token, f"/repos/{repo}/pulls/{pr_number}")
     title, body = pr["title"], pr.get("body") or ""
     files = gh_paged(token, f"/repos/{repo}/pulls/{pr_number}/files")
-    diff = "".join(f.get("patch", "") for f in files)[:DIFF_CAP]
+
+    full_diff = "".join(f.get("patch", "") for f in files)
+    diff_truncated = len(full_diff) > DIFF_CAP
+    diff = full_diff[:DIFF_CAP]
+    diff_label = f"Diff ({len(full_diff)} chars{' — TRUNCATED to ' + str(DIFF_CAP) if diff_truncated else ''})"
+
+    # Fail closed when diff is truncated: the reviewer cannot do a complete review.
+    if diff_truncated:
+        print(
+            f"diff too large ({len(full_diff)} > {DIFF_CAP} chars); "
+            "failing closed (check red, merge blocked)",
+            flush=True,
+        )
+        return 1
 
     change_artifacts = ""
+    change_artifacts_truncated = False
     match = re.search(r"\*\*Change:\*\*\s*([\w.-]+)", body)
     if match:
         change_name = match.group(1)
@@ -241,12 +255,26 @@ def main():
                     token,
                     f"/repos/{repo}/contents/openspec/changes/{change_name}/{artifact}?ref={base_ref}",
                 )
-                change_artifacts += (
-                    f"\n--- {artifact} ---\n"
-                    + base64.b64decode(entry["content"]).decode(errors="replace")[:20_000]
-                )
+                artifact_text = base64.b64decode(entry["content"]).decode(errors="replace")
+                if len(artifact_text) > 20_000:
+                    change_artifacts_truncated = True
+                    artifact_text = artifact_text[:20_000] + "\n[TRUNCATED]\n"
+                change_artifacts += f"\n--- {artifact} ---\n" + artifact_text
             except RuntimeError:
                 pass  # best-effort; absence of artifacts is not fatal
+
+    if len(change_artifacts) > 30_000:
+        change_artifacts_truncated = True
+        change_artifacts = change_artifacts[:30_000] + "\n[TRUNCATED]\n"
+
+    # Fail closed when change artifacts are truncated: the reviewer cannot
+    # see the full spec/design to evaluate alignment.
+    if change_artifacts_truncated:
+        print(
+            "change artifacts too large; failing closed (check red, merge blocked)",
+            flush=True,
+        )
+        return 1
 
     ci_line = "; ".join(f"{k}={v}" for k, v in status.items())
     system = (
@@ -280,8 +308,8 @@ def main():
     user = (
         f"PR #{pr_number}: {title}\n\nBody:\n{body}\n\n"
         f"Required CI checks: {ci_line}\n\n"
-        f"Change artifacts:\n{change_artifacts[:30_000]}\n\n"
-        f"Diff ({len(diff)} chars)\n{diff}\n\n"
+        f"Change artifacts:\n{change_artifacts}\n\n"
+        f"{diff_label}\n{diff}\n\n"
         "END OF PR EVIDENCE. Now produce your verdict JSON."
     )
 
