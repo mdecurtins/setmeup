@@ -14,7 +14,6 @@ The rejection patterns cluster into 5 categories. Some are OpenSpec-proposal hyg
 **Non-Goals:**
 - NOT modifying the agent-review gate itself (it works correctly; the gap is in proposal authoring)
 - NOT a change to `.github/` workflows or CI
-- NOT adding OpenSpec specs for the new skill (it's developer tooling, not a product capability)
 
 ## Decisions
 
