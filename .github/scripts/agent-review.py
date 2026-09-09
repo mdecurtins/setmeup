@@ -82,9 +82,24 @@ def gh_paged(token, path):
     return items
 
 
+def gh_paged_field(token, path, field):
+    """Like gh_paged but for endpoints that return an object wrapping a list
+    in a named field, e.g. check-runs -> {"check_runs": [...]}."""
+    items, page = [], 1
+    while True:
+        sep = "&" if "?" in path else "?"
+        payload = gh(token, f"{path}{sep}per_page=100&page={page}")
+        batch = payload.get(field) or []
+        items.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+    return items
+
+
 def check_status(token, repo, head_sha):
     """Return {check_name: conclusion} for the four quality checks on head."""
-    runs = gh_paged(token, f"/repos/{repo}/commits/{head_sha}/check-runs")
+    runs = gh_paged_field(token, f"/repos/{repo}/commits/{head_sha}/check-runs", "check_runs")
     status = {}
     for run in runs:
         name = run.get("name")
