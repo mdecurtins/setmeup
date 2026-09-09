@@ -82,6 +82,8 @@ When ready to implement, run /opsx-apply
       - Use **AskUserQuestion tool** to clarify
       - Then continue with creation
 
+   d. **Before declaring the proposal ready**: after all `applyRequires` artifacts are done, load the `ci-gate` skill and run its pre-PR checklist.
+
 5. **Show final status**
    ```bash
    openspec status --change "<name>"
