@@ -8,4 +8,4 @@
 
 - [x] 2.1 Confirm `agent-review` workflow's quality-gate polling list is unaffected (it lists check contexts, not tools) and no spec/check-name change is needed
 - [x] 2.2 Run the done-gate for this governance change: `cargo fmt --check` ✓, `openspec validate` ✓ 18/18. `clippy`/`cargo test` are blocked by a pre-existing environment limitation only (no `cc`/`gcc` on this box; `target/` holds root-owned artifacts from a prior privileged build) — no Rust source changes in this change, and the full gate runs on the GitHub runner.
-- [ ] 2.3 Confirm issue #31 is referenced by the change; the PR references both the change and #31, and merging closes #31
+- [x] 2.3 Confirm issue #31 is referenced by the change; the PR references both the change and #31, and merging closes #31
