@@ -18,9 +18,9 @@ The system SHALL provide a thin bootstrap launcher that gets the setmeup binary 
 - **THEN** `scripts/install-hooks.sh` is invoked and the repo-pinned hooks are active
 
 ### Requirement: Bootstrap script contains no provisioning logic
-The bootstrap script SHALL contain no provisioning intelligence; it only delivers the binary and launches the wizard.
+The bootstrap script SHALL contain no provisioning intelligence; it only delivers the binary and launches the wizard. **The dev-clone hook installation is explicitly carved out of this requirement: when a clone is detected, the script SHALL run `scripts/install-hooks.sh`, which is development-environment setup, not product provisioning.**
 
 #### Scenario: Provisioning decisions live in the binary
 - **WHEN** a user inspects the bootstrap script
 - **THEN** the script does not install tools, write configuration, or manage credentials beyond acquiring the tool itself
-- **THEN** any development-only hook installation is wired (when a clone is detected) without adding product provisioning logic
+- **THEN** the only exception is the explicitly carved-out dev-clone hook installation, which runs `scripts/install-hooks.sh` when a clone is detected

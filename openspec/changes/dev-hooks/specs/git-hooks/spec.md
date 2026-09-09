@@ -1,16 +1,16 @@
 ## ADDED Requirements
 
 ### Requirement: Repository-pinned git hooks
-The repository SHALL pin and commit its git hooks in a `git-hooks/` directory and register them as the repository hooks path via `core.hooksPath`, so a fresh clone receives the hooks without per-machine setup.
+The repository SHALL pin and commit its git hooks in a `git-hooks/` directory and, via the install step, register them as the repository hooks path (`core.hooksPath`), so a fresh clone activates the committed hooks with a single install command instead of manual per-machine setup.
 
 #### Scenario: Fresh clone
-- **WHEN** a contributor clones the repository
-- **THEN** the repo `core.hooksPath` points to the committed `git-hooks/` directory
-- **THEN** hooks are active without manual copy into `.git/hooks`
+- **WHEN** a contributor clones the repository and runs `scripts/install-hooks.sh` (or `bootstrap.sh` in a dev-clone context)
+- **THEN** the clone's `core.hooksPath` points to the committed `git-hooks/` directory
+- **THEN** hooks are active without manual copying into `.git/hooks` or per-machine configuration
 
 #### Scenario: Hook update
 - **WHEN** hooks are changed and committed
-- **THEN** all clones and existing checkouts pick up the new hooks on the next hook-triggering action
+- **THEN** checkouts that have activated hooks pick up the new hooks on the next hook-triggering action (the hooks are read from the committed directory on each run); checkouts that have not run the install step continue without local hooks until they do
 
 ### Requirement: Conventional commit enforcement on commit
 The commit-msg hook SHALL enforce Conventional Commits with an optional scope and the configured allowed types, rejecting non-conventional messages.
@@ -24,11 +24,16 @@ The commit-msg hook SHALL enforce Conventional Commits with an optional scope an
 - **THEN** the commit is accepted
 
 ### Requirement: Secret prevention at staging time
-The pre-commit hook SHALL scan staged content for secret-like patterns and reject the commit if a match is found, so a secret never enters history.
+The pre-commit hook SHALL scan staged content for secret-like patterns and reject the commit if a match is found, so a secret never enters history. **The scan uses gitleaks when it is available; when gitleaks is not installed the hook SHALL warn (fail-open) and continue, because the CI secrets check remains the hard gate.**
 
-#### Scenario: Secret-like string staged
-- **WHEN** a contributor stages a diff containing a string matching a known secret pattern (e.g., an API key, `sk-`, token-like)
+#### Scenario: Secret-like string staged (gitleaks available)
+- **WHEN** gitleaks is available and a contributor stages a diff containing a string matching a known secret pattern (e.g., an API key, `sk-`, token-like)
 - **THEN** the pre-commit hook fails and the commit is blocked
+
+#### Scenario: Secret-like string staged (gitleaks unavailable)
+- **WHEN** gitleaks is not installed and a contributor stages content that may contain secret-like patterns
+- **THEN** the pre-commit hook prints a warning that local secret prevention is inactive
+- **THEN** the commit proceeds (CI's secrets check is the hard gate)
 
 #### Scenario: Clean staged content
 - **WHEN** a contributor stages a diff with no secret-like pattern
@@ -48,7 +53,7 @@ The pre-push hook SHALL run the done-gate preflight before allowing a push, at m
 ### Requirement: Hook installation wiring
 The hooks SHALL be installable via `scripts/install-hooks.sh` and SHALL be wired into both `bootstrap.sh` (fresh machine) and a dev-time install/verify path, so hooks are present on first setup and kept in place during development.
 
-#### Scenario: Basstrap bootstraps hooks
+#### Scenario: Bootstrap bootstraps hooks
 - **WHEN** a user runs `bootstrap.sh` on a fresh machine
 - **THEN** `scripts/install-hooks.sh` is invoked and the hooks are active
 

@@ -16,12 +16,12 @@
 
 - [ ] 3.1 Wire `bootstrap.sh` to run `scripts/install-hooks.sh` only when a repo clone (development context) is detected — never in the `curl | sh` delivery path
 - [ ] 3.2 Add a dev-time install/verify check (e.g. in `AGENTS.md` workflow / a `make`-style convenience) so development always keeps hooks active
-- [ ] 3.3 Probe-verify: fresh-clone simulation installs hooks with zero manual steps; delivery-path bootstrap does NOT install hooks
+- [ ] 3.3 Probe-verify: fresh-clone simulation + one install step activates hooks with no per-machine manual setup; delivery-path bootstrap does NOT install hooks
 
 ## 4. Behavior verification (negative tests)
 
 - [ ] 4.1 Attempt a non-conventional commit message → rejected at `commit-msg` with a format hint
-- [ ] 4.2 Stage a secret-like string (e.g. a test `sk-…` token) → rejected at `pre-commit`
+- [ ] 4.2 Stage a secret-like string (e.g. a test `sk-…` token) with gitleaks installed → rejected at `pre-commit`; with gitleaks absent → warning + continue (CI remains the hard gate)
 - [ ] 4.3 Push a branch with a deliberate fmt/clippy/test failure → blocked at `pre-push` with the failing gate reported
 - [ ] 4.4 Valid conventional commit + clean gate → accepted end-to-end
 

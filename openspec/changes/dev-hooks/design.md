@@ -7,11 +7,11 @@ The done-gate is defined in `AGENTS.md`: `fmt --check` clean, `clippy -D warning
 ## Goals / Non-Goals
 
 **Goals:**
-- Repo-pinned hooks via committed `git-hooks/` + `core.hooksPath`, so a fresh clone gets hooks with zero manual steps
+- Repo-pinned hooks via committed `git-hooks/` + `core.hooksPath` (set by the install script), so a fresh clone activates the committed hooks with a single install command instead of per-machine setup
 - `commit-msg`: enforce Conventional Commits (type + optional scope), reject non-conforming messages
-- `pre-commit`: reject secret-like staged content before it enters history
+- `pre-commit`: reject secret-like staged content before it enters history (gitleaks scan when available; warn and continue when absent — CI is the hard gate)
 - `pre-push`: done-gate preflight (fmt, clippy `-D warnings`, tests when a crate is present)
-- `scripts/install-hooks.sh` wired into BOTH `bootstrap.sh` and a dev-time install/verify path
+- `scripts/install-hooks.sh` wired into BOTH `bootstrap.sh` (development clone only) and a dev-time install/verify path
 - Document hooks in `AGENTS.md` + `docs/workflow.md`
 
 **Non-Goals:**
@@ -26,14 +26,14 @@ The done-gate is defined in `AGENTS.md`: `fmt --check` clean, `clippy -D warning
 **Why:** Zero dependencies, trivially auditable, and the "minimal dependencies" principle. The hooks are small and shell-native; a framework adds abstraction without benefit.
 **Alternative considered:** lefthook (nice DX, config-driven) — adds a dependency and a bootstrap step; rejected for minimalism.
 
-### D2. `core.hooksPath` = committed dir; `bootstrap.sh` only installs hooks in a dev clone, never in the delivery path
-**Decision:** The repo registers `git-hooks/` via `core.hooksPath` (committed to repo config). `bootstrap.sh` runs `scripts/install-hooks.sh` ONLY when it detects a repo clone (development context); it never touches hooks in the `curl | sh` product-delivery path.
-**Why:** The `bootstrap` spec requires the script to contain no provisioning logic (delivers binary + launches wizard). Detecting a clone and installing the dev hooks is a development-context concern, not product provisioning — but it must be gated so the delivery path stays clean.
+### D2. `core.hooksPath` = committed hooks dir; `install-hooks.sh` sets the config; `bootstrap.sh` installs only in a dev clone, never in the delivery path
+**Decision:** The hooks live in committed `git-hooks/`; `scripts/install-hooks.sh` sets `core.hooksPath=git-hooks/` via the local git config (it cannot be committed — git never reads repo-committed config). `bootstrap.sh` runs `scripts/install-hooks.sh` ONLY when it detects a repo clone (development context); it never touches hooks in the `curl | sh` product-delivery path.
+**Why:** The `bootstrap` spec requires the script to contain no provisioning logic (delivers binary + launches wizard). Detecting a clone and installing the dev hooks is a development-context concern, not product provisioning — an explicit carve-out — but it must be gated so the delivery path stays clean (D3 spec scenario reflects the gitleaks-unavailable warning).
 
 ### D3. `pre-commit` secret scan via gitleaks (not a hand-rolled regex)
 **Decision:** `pre-commit` runs `gitleaks` on staged content (or a `gitleaks protect`-style scan) using the existing `.gitleaks/setmeup.toml` config, rather than a custom grep.
 **Why:** Reuse the exact same allowlist/pattern source as CI for a consistent secret gate. If gitleaks isn't installed locally, the hook degrades gracefully to a warning (fail-open with a note to install), since CI is the hard gate; a false-positive from a hand-rolled regex is worse than a warning.
-**Trade-off:** If gitleaks isn't present, local secret prevention is soft — acceptable because CI enforces hard.
+**Trade-off:** If gitleaks isn't present, local secret prevention is soft — acceptable because CI enforces hard. This fail-open is a declared design choice (not an accident): the spec's secret-prevention requirement and scenarios are written conditionally on gitleaks availability to match.
 
 ### D4. `pre-push` done-gate preflight, cargo-gated
 **Decision:** `pre-push` runs `cargo fmt --check` and `clippy --all-targets --all-features -- -D warnings` and `cargo test` only when `Cargo.toml` exists (mirrors CI's `hashFiles` guard), so scaffold-only changes are not blocked.
@@ -55,7 +55,7 @@ The done-gate is defined in `AGENTS.md`: `fmt --check` clean, `clippy -D warning
 1. Add `git-hooks/` with `commit-msg`, `pre-commit`, `pre-push`, and a `git-hooks/README.md`
 2. Add `scripts/install-hooks.sh` + `scripts/verify-hooks.sh`
 3. Wire `bootstrap.sh` to run install-hooks only on clone detection
-4. Register `core.hooksPath` (committed config)
+4. Register `core.hooksPath` in the local config via the install script (per-clone; not committed)
 5. Update `AGENTS.md` + `docs/workflow.md`
 6. Verify: fresh-clone simulation, non-conventional commit rejected, secret-staged commit rejected, failing-gate push blocked, passing push accepted
 
