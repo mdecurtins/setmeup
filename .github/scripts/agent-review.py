@@ -104,7 +104,9 @@ def check_status(token, repo, head_sha):
     for run in runs:
         name = run.get("name")
         if name and name in QUALITY_CHECKS:
-            status[name] = run.get("conclusion") or run.get("status") or "pending"
+            # API returns lowercase conclusions ("success"); normalize to UPPER
+            # so the fail-closed gate ("SUCCESS") compares consistently.
+            status[name] = (run.get("conclusion") or run.get("status") or "pending").upper()
     return status
 
 
