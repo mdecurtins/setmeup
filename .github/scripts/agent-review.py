@@ -152,13 +152,13 @@ def parse_verdict(raw):
 
 
 def post_comment(token, repo, pr_number, body):
-    """Post a general PR (issue) comment. Best-effort — a comment failure must
-    not mask the agent's exit code. Uses the issues endpoint (an issue comment
-    on #pr_number), which requires issues: write."""
+    """Post a general PR (issue) comment. The comment is best-effort UX, not
+    the gate — but failures are printed to the log so they are diagnosable
+    (a truly silent swallow made the reject path hard to debug)."""
     try:
         gh(token, f"/repos/{repo}/issues/{pr_number}/comments", method="POST", data={"body": body})
-    except RuntimeError:
-        pass
+    except RuntimeError as exc:
+        print(f"note: failed to post verdict comment (non-fatal): {exc}", flush=True)
 
 
 def main():
@@ -255,7 +255,11 @@ def main():
         + "**Required:** " + verdict["required_action"]
     )
     post_comment(token, repo, pr_number, comment)
-    print("agent review FAILED (check red, merge blocked)", flush=True)
+    print(
+        f"agent review FAILED (check red, merge blocked); "
+        f"summary={verdict['summary']!r}; required={verdict['required_action']!r}",
+        flush=True,
+    )
     return 1
 
 
