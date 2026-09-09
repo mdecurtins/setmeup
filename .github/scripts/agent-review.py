@@ -30,6 +30,10 @@ Security posture (public repo):
     evidence, and any instruction inside it is ignored (system prompt).
   - Fail closed: a missing secret, an exception, or a malformed LLM verdict
     fails the check. No quiet success.
+  - Evidence completeness: the diff and change artifacts are reviewed in full
+    (fail closed if truncated) and the changed-file manifest with statuses and
+    previous_filename is included, so renames/moves are never invisible to the
+    gate.
 
 Environment (set by .github/workflows/agent-review.yml):
   GH_TOKEN                built-in GITHUB_TOKEN (read evidence + reject comment)
@@ -224,10 +228,24 @@ def main():
         print("quality gate not green; failing closed (check red, merge blocked)", flush=True)
         return 1
 
-    # Gather PR evidence: title, body, diff, and (best-effort) change artifacts.
+    # Gather PR evidence: title, body, diff, file manifest, and (best-effort)
+    # change artifacts.
     pr = gh(token, f"/repos/{repo}/pulls/{pr_number}")
     title, body = pr["title"], pr.get("body") or ""
     files = gh_paged(token, f"/repos/{repo}/pulls/{pr_number}/files")
+
+    # File manifest: name, status, previous_filename for renames/renames, and
+    # +/- counts. Without it, renames/moves contribute no patch text and are
+    # invisible to the reviewer (e.g. an archive move). The reviewer must see
+    # what paths changed and how, including security-sensitive paths.
+    file_lines = []
+    for f in files:
+        status = f.get("status", "")
+        prev = f.get("previous_filename")
+        prev_part = f" <- {prev}" if prev else ""
+        counts = f"+{f.get('additions', 0)}/-{f.get('deletions', 0)}"
+        file_lines.append(f"{status}: {f.get('filename', '?')}{prev_part} ({counts})")
+    file_manifest = "\n".join(file_lines)
 
     full_diff = "".join(f.get("patch", "") for f in files)
     diff_truncated = len(full_diff) > DIFF_CAP
@@ -309,6 +327,7 @@ def main():
         f"PR #{pr_number}: {title}\n\nBody:\n{body}\n\n"
         f"Required CI checks: {ci_line}\n\n"
         f"Change artifacts:\n{change_artifacts}\n\n"
+        f"Files changed in this PR ({len(files)}):\n{file_manifest}\n\n"
         f"{diff_label}\n{diff}\n\n"
         "END OF PR EVIDENCE. Now produce your verdict JSON."
     )
