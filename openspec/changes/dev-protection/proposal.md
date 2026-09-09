@@ -31,4 +31,4 @@ Every quality gate in this public repo is currently policy enforced only by agen
 - Dependabot config (new, `.github/dependabot.yml`)
 - GitHub repository settings (branch protection, merge button, auto-delete) — enforced via `gh api`/rulesets, not committed files
 - `docs/workflow.md` and `openspec/specs/` (pr-conventions, ci-pipeline deltas) updated to describe the enforced gates
-- New `agent-review` workflow + script (dormant until the OpenRouter key is provisioned)
+- New `agent-review` workflow (`pull_request_target`, runs trusted default-branch code) + script (dormant until the OpenRouter key is provisioned)

@@ -141,36 +141,3 @@ jobs:
           GITLEAKS_CONFIG: .gitleaks/setmeup.toml
         # Fail closed: any secret-like pattern in tracked content blocks the change.
         # Legitimate false positives are allowlisted in .gitleaks/setmeup.toml (reviewed).
-
-  # Adversarial agent review (dev-protection D7): the approval-equivalent gate.
-  # Runs ONLY after the four quality checks settle (needs) so it cannot race
-  # them — GitHub schedules this after coverage/deps/shell/secrets finish. The
-  # check's exit code IS the merge gate (green = review passed, red = blocked).
-  # Pull-request-only (push-to-main has no PR event); fork-guarded; dormant
-  # behind AGENT_REVIEWER_ENABLED; uses the setmeup_ci environment for the one
-  # secret (OPENROUTER_API_KEY). No GitHub App is involved.
-  agent-review:
-    runs-on: ubuntu-latest
-    needs: [coverage, deps, shell, secrets]
-    environment: setmeup_ci
-    permissions:
-      contents: read
-      issues: write # verdict comment (issue comment) when the review rejects
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.fork == false &&
-      !github.event.pull_request.draft &&
-      vars.AGENT_REVIEWER_ENABLED == 'true'
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-
-      - name: Run adversarial agent review
-        env:
-          GH_TOKEN: ${{ github.token }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_EVENT_PATH: ${{ github.event_path }}
-          AGENT_REVIEWER_MODEL: ${{ vars.AGENT_REVIEWER_MODEL }}
-        run: python3 .github/scripts/agent-review.py

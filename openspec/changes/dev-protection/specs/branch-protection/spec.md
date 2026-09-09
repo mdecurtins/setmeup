@@ -17,7 +17,7 @@ The repository SHALL enforce branch protection on the `main` branch such that di
 - **THEN** the merge is blocked until the required checks pass
 
 ### Requirement: Required status checks enforced
-The `main` branch SHALL require the coverage, deps, shell, secrets, **and agent-review** CI jobs to pass before a PR can merge. The **agent-review** check is the adversarial review: it performs the same function as a PR approval (a PR cannot merge until the review passes) but is enforced as a *status check* rather than a review event, so no second GitHub identity is required.
+The `main` branch SHALL require the coverage, deps, shell, secrets, **and agent-review** CI jobs to pass before a PR can merge. The **agent-review** check is the adversarial review: it performs the same function as a PR approval (a PR cannot merge until the review passes) but is enforced as a *status check* rather than a review event, so no second GitHub identity is required. It runs from the default branch via `pull_request_target` so the PR cannot modify its own reviewer.
 
 #### Scenario: Check fails
 - **WHEN** any required status check (coverage, deps, shell, secrets, agent-review) fails on a PR
