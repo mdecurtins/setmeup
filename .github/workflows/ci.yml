@@ -69,6 +69,8 @@ jobs:
       - name: Install cargo-llvm-cov
         if: hashFiles('Cargo.toml') != ''
         uses: taiki-e/install-action@4005ba9a372944291571d98926b7bf5016bf6c56 # cargo-llvm-cov
+        with:
+          tool: cargo-llvm-cov
 
       - name: Collect coverage
         if: hashFiles('Cargo.toml') != ''
@@ -86,6 +88,8 @@ jobs:
       - name: Install cargo-deny
         if: hashFiles('Cargo.toml') != ''
         uses: taiki-e/install-action@f1dd293276342cf06b423f44b1c7c9312a2d2ecb # cargo-deny
+        with:
+          tool: cargo-deny
 
       - name: Run cargo deny (advisories, licenses, sources)
         if: hashFiles('Cargo.toml') != ''
