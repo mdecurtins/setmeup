@@ -51,15 +51,15 @@ The pre-push hook SHALL run the done-gate preflight before allowing a push, at m
 - **THEN** the push proceeds
 
 ### Requirement: Hook installation wiring
-The hooks SHALL be installable via `scripts/install-hooks.sh` and SHALL be wired into both `bootstrap.sh` (setmeup development-clone context only) and a dev-time install/verify path, so hooks are present on first setup and kept in place during development.
+The hooks SHALL be installable via `scripts/install-hooks.sh` and SHALL be wired into a dev-time install/verify path, so hooks are present in development and kept in place. **The product-delivery bootstrap SHALL NOT install hooks or execute any file from the caller's working directory — hook installation is an explicit developer action.**
 
-#### Scenario: Bootstrap bootstraps hooks
-- **WHEN** a user runs `bootstrap.sh` in a positively identified setmeup development clone
-- **THEN** `scripts/install-hooks.sh` is invoked and the hooks are active
+#### Scenario: Dev-time install
+- **WHEN** a developer runs the dev-time hook install/verify step
+- **THEN** the hooks are installed and verified active
 
-#### Scenario: Delivery-path bootstrap leaves hooks alone
-- **WHEN** a user runs the `curl | sh` bootstrap outside the setmeup repository (bare machine or unrelated git worktree)
-- **THEN** `scripts/install-hooks.sh` is NOT invoked and no hooks are changed in the running directory
+#### Scenario: Delivery-path bootstrap never installs hooks
+- **WHEN** a user runs the `curl | sh` bootstrap (in any directory, including a clone or an unrelated or malicious worktree)
+- **THEN** `scripts/install-hooks.sh` is not invoked and no local file is executed by the bootstrap
 
 #### Scenario: Dev-time install
 - **WHEN** a developer runs the dev-time hook install/verify step

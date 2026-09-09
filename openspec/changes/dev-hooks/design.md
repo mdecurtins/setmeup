@@ -11,13 +11,13 @@ The done-gate is defined in `AGENTS.md`: `fmt --check` clean, `clippy -D warning
 - `commit-msg`: enforce Conventional Commits (type + optional scope), reject non-conforming messages
 - `pre-commit`: reject secret-like staged content before it enters history (gitleaks scan, fail closed when gitleaks is absent — the local prevention loop must be real, not advisory)
 - `pre-push`: done-gate preflight (fmt, clippy `-D warnings`, tests when a crate is present)
-- `scripts/install-hooks.sh` wired into BOTH `bootstrap.sh` (development clone only) and a dev-time install/verify path
+- `scripts/install-hooks.sh` wired into a dev-time install/verify path; the delivery bootstrap never executes local files (decision D2)
 - Document hooks in `AGENTS.md` + `docs/workflow.md`
 
 **Non-Goals:**
 - NOT a full pre-commit framework (lefthook/husky/pre-commit) — minimal native hooks, no new dependency
 - NOT enforcing spec-scenario coverage locally (that stays in CI; local hooks cover the cheap mechanical gates)
-- NOT changing the runtime provisioning story of `bootstrap.sh` (see decision D2)
+- NOT auto-installing hooks from the product-delivery bootstrap (see decision D2 — that would execute a user-controlled local file under `curl | sh`)
 
 ## Decisions
 
@@ -26,15 +26,10 @@ The done-gate is defined in `AGENTS.md`: `fmt --check` clean, `clippy -D warning
 **Why:** Zero dependencies, trivially auditable, and the "minimal dependencies" principle. The hooks are small and shell-native; a framework adds abstraction without benefit.
 **Alternative considered:** lefthook (nice DX, config-driven) — adds a dependency and a bootstrap step; rejected for minimalism.
 
-### D2. `core.hooksPath` = committed hooks dir; `install-hooks.sh` sets the config; `bootstrap.sh` installs only in a dev clone, never in the delivery path
-**Decision:** The hooks live in committed `git-hooks/`; `scripts/install-hooks.sh` sets `core.hooksPath=git-hooks/` via the local git config (it cannot be committed — git never reads repo-committed config). `bootstrap.sh` runs `scripts/install-hooks.sh` ONLY when it positively identifies the working directory as the setmeup repository; it never touches hooks in the `curl | sh` product-delivery path.
-**Why:** The `bootstrap` spec requires the script to contain no provisioning logic (delivers binary + launches wizard). Detecting a clone and installing the dev hooks is a development-context concern, not product provisioning — an explicit carve-out — but it must be gated so the delivery path stays clean.
-**Clone-detection mechanism (must be positive identification, not "a .git dir exists"):** `bootstrap.sh` runs the hook install only when ALL of the following hold in the current working directory:
-1. `git rev-parse --is-inside-work-tree` succeeds (it is a git worktree), AND
-2. `git remote get-url origin` matches the setmeup repository URL (`github.com/mdecurtins/setmeup`), AND
-3. the setmeup marker exists (e.g. `openspec/config.yaml` or the repo `AGENTS.md`).
-
-A `curl | sh` run inside an unrelated Git worktree fails condition 2 or 3, so it never alters that worktree's hooks. This is a negative-test scenario in the bootstrap spec.
+### D2. `core.hooksPath` set by an explicit developer action — the delivery bootstrap NEVER runs local scripts
+**Decision:** The hooks live in committed `git-hooks/`; `scripts/install-hooks.sh` sets `core.hooksPath=git-hooks/` via the local git config (it cannot be committed — git never reads repo-committed config). Hook installation is an **explicit developer action** run in their own clone (`scripts/install-hooks.sh`, or a documented dev-time install/verify step). The `curl | sh` product-delivery bootstrap **never** invokes `install-hooks.sh` and, more broadly, never executes any file from the caller's working directory.
+**Why:** A `curl | sh` bootstrap that runs a script from the user's CWD is a trust-boundary violation: an attacker who controls that directory (a malicious clone or worktree with a fabricated `origin` and marker file) would get their code executed by the "official" install. There is no unforgeable local identity check that survives CWD execution, so the only safe design is to not execute local files from the delivery path at all. Hook install lives on the developer's explicit action — where the developer's own trust decision applies to their own clone.
+**Trade-off:** A fresh dev clone needs one explicit command (`scripts/install-hooks.sh`) instead of automatic wiring — acceptable, documented in AGENTS.md, and probed (adversary scenario: a malicious worktree with spoofed origin/marker, proving the delivery bootstrap executes nothing from it).
 
 ### D3. `pre-commit` secret scan via gitleaks (not a hand-rolled regex); fails closed when gitleaks is missing
 **Decision:** `pre-commit` runs `gitleaks` on staged content (or a `gitleaks protect`-style scan) using the existing `.gitleaks/setmeup.toml` config, rather than a custom grep. **The gate fails closed: if gitleaks is not installed, the hook blocks the commit and prints install instructions, because the change's stated motivation is that push-time CI detection is already too late — a secret reaching history-clean CI is not the prevention goal.** `install-hooks.sh` verifies gitleaks availability and surfaces install guidance at setup time.
@@ -55,17 +50,18 @@ A `curl | sh` run inside an unrelated Git worktree fails condition 2 or 3, so it
 - **[pre-push adds latency] → Mitigation:** cargo-gated (only when crate present); scope is the four done-gate checks, no redundant work.
 - **[core.hooksPath surprise for contributors] → Mitigation:** hooks are fast/local, behaviors documented; `install-hooks.sh --verify` prints state.
 - **[Hook bypass is trivial (skip hooks)] → Mitigation:** hooks are friction-reduction + prevention, not security; the hard gates are branch protection + CI required checks (dev-protection). Document this framing so nobody over-trusts the local hooks.
+- **[Malicious local clone hijacks the delivery bootstrap] → Mitigation:** the `curl | sh` bootstrap never executes any file from the caller's working directory and never runs `install-hooks.sh`; hook installation is an explicit developer action. Adversary probe (task 3.4) proves a spoofed-origin worktree gets nothing executed.
 
 ## Migration Plan
 
 1. Add `git-hooks/` with `commit-msg`, `pre-commit`, `pre-push`, and a `git-hooks/README.md`
 2. Add `scripts/install-hooks.sh` + `scripts/verify-hooks.sh`
-3. Wire `bootstrap.sh` to run install-hooks only on clone detection
+3. Document the explicit dev-time install step in `AGENTS.md` + a `make`-style convenience (no bootstrap wiring)
 4. Register `core.hooksPath` in the local config via the install script (per-clone; not committed)
 5. Update `AGENTS.md` + `docs/workflow.md`
-6. Verify: fresh-clone simulation, non-conventional commit rejected, secret-staged commit rejected, failing-gate push blocked, passing push accepted
+6. Verify: fresh-clone simulation, non-conventional commit rejected, secret-staged commit rejected, failing-gate push blocked, passing push accepted, delivery bootstrap executes nothing from CWD
 
-Rollback: unset `core.hooksPath`; delete the hooks dir + script; revert docs + bootstrap wiring.
+Rollback: unset `core.hooksPath`; delete the hooks dir + script; remove the dev-time install step from docs.
 
 ## Open Questions
 

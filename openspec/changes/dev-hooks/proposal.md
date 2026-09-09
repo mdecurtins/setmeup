@@ -8,7 +8,7 @@ Zero git hooks exist in the repo or on this machine. Fresh clones get none (per-
 - `commit-msg`: enforce Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:` with optional scope)
 - `pre-commit`: reject staged secret-like content before it enters history — gitleaks scan against `.gitleaks/setmeup.toml`, fail closed (block with install instructions) when gitleaks is absent
 - `pre-push`: run the done-gate preflight (fmt, clippy `-D warnings`, tests when a crate is present) before a push
-- Add `scripts/install-hooks.sh` — wired into `bootstrap.sh` (development-clone context only, gated on positive setmeup-repo identification) and a dev-time install/verify check
+- Add `scripts/install-hooks.sh` — installed by an explicit developer action (dev-time install/verify step); the `curl | sh` product-delivery bootstrap never executes local files or installs hooks (trust boundary)
 - Document the hooks in `AGENTS.md` and `docs/workflow.md`
 
 ## Capabilities
@@ -17,13 +17,12 @@ Zero git hooks exist in the repo or on this machine. Fresh clones get none (per-
 - `git-hooks`: repo-pinned local git hooks that enforce commit message convention, secret prevention at staging time, and the done-gate before push
 
 ### Modified Capabilities
-- `bootstrap`: installing the hooks becomes part of bootstrapping in a development clone
+- `bootstrap`: remains free of provisioning logic; the delivery path explicitly never executes local files (no hook auto-install)
 - `workflow-docs`: `docs/workflow.md` and `AGENTS.md` describe the hook install + behavior
 
 ## Impact
 
 - `git-hooks/` (new, committed; activated via `core.hooksPath` set by the install script)
 - `scripts/install-hooks.sh` (new)
-- `bootstrap.sh` (wires hook install, development-clone context only)
-- `AGENTS.md`, `docs/workflow.md` (documentation)
-- Local developer machines (hooks become active on clone + one install step)
+- `AGENTS.md`, `docs/workflow.md` (documentation, including the explicit dev-time install step)
+- Local developer machines (hooks become active on clone + one explicit install command)

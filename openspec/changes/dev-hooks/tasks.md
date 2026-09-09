@@ -12,12 +12,12 @@
 - [ ] 2.2 Add `scripts/verify-hooks.sh`: checks hooks exist, are executable, and `core.hooksPath` is set correctly
 - [ ] 2.3 Verify idempotency: run install twice, confirm no mutation and correct state both times
 
-## 3. Bootstrap + dev-time wiring
+## 3. Dev-time wiring (explicit action; no delivery-path auto-install)
 
-- [ ] 3.1 Wire `bootstrap.sh` to run `scripts/install-hooks.sh` ONLY when the working directory is positively identified as the setmeup repo (git worktree AND `git remote get-url origin` matches `github.com/mdecurtins/setmeup` AND a setmeup marker file exists) — never in the `curl | sh` delivery path and never in unrelated Git worktrees
-- [ ] 3.2 Add a dev-time install/verify check (e.g. in `AGENTS.md` workflow / a `make`-style convenience) so development always keeps hooks active
-- [ ] 3.3 Probe-verify: fresh-clone simulation + one install step activates hooks with no per-machine manual setup; delivery-path bootstrap does NOT install hooks
-- [ ] 3.4 Probe-verify (adversary): run the `curl | sh` bootstrap inside an unrelated existing Git worktree → the setmeup detection (remote URL / marker mismatch) prevents any change to that worktree's hooks
+- [ ] 3.1 Install/verify is an explicit developer action: `scripts/install-hooks.sh` in the developer's own clone, surfaced as a documented dev-time step — `bootstrap.sh` SHALL NOT be wired to it and SHALL NOT execute any file from the working directory
+- [ ] 3.2 Add a dev-time install/verify check (e.g. in `AGENTS.md` workflow / a `make`-style convenience) so development keeps hooks active
+- [ ] 3.3 Probe-verify: fresh-clone simulation + one explicit install command activates hooks with no per-machine manual setup
+- [ ] 3.4 Probe-verify (adversary, trust boundary): a malicious/unrelated git worktree with a fabricated `origin` URL and a fake marker is completely inert under the `curl | sh` bootstrap — nothing from the working directory is executed, no hooks are touched (proves the delivery path has no CWD-execution surface)
 
 ## 4. Behavior verification (negative tests)
 
