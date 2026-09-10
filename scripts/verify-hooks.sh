@@ -14,7 +14,7 @@ REPO_TOP="$(cd "$(dirname "$0")/.." && pwd)"
 all_ok=0
 
 # Check core.hooksPath.
-current_hooks="$(git config --local core.hooksPath 2>/dev/null || true)"
+current_hooks="$(git -C "$REPO_TOP" config --local core.hooksPath 2>/dev/null || true)"
 if [ "$current_hooks" != "$REPO_TOP/$HOOK_DIR" ]; then
 	printf 'ERROR: core.hooksPath is "%s" — expected "%s"\n' "${current_hooks:-<unset>}" "$REPO_TOP/$HOOK_DIR" >&2
 	all_ok=1

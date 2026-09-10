@@ -34,7 +34,7 @@ if [ "${1:-}" = '--verify' ]; then
 	print_status 'verify mode — checking hook state'
 	verify_hooks
 	rc=$?
-	current_hooks="$(git config --local core.hooksPath 2>/dev/null || true)"
+	current_hooks="$(git -C "$REPO_TOP" config --local core.hooksPath 2>/dev/null || true)"
 	print_status "core.hooksPath = ${current_hooks:-<not set>}"
 	exit "$rc"
 fi
@@ -48,7 +48,7 @@ for hook in "${HOOKS[@]}"; do
 	chmod +x "$REPO_TOP/$HOOK_DIR/$hook"
 done
 
-git config core.hooksPath "$REPO_TOP/$HOOK_DIR"
+git -C "$REPO_TOP" config core.hooksPath "$REPO_TOP/$HOOK_DIR"
 print_status "core.hooksPath set to '$REPO_TOP/$HOOK_DIR'"
 
 verify_hooks
