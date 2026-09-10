@@ -42,6 +42,20 @@ A task or change is complete only when ALL of the following hold:
 
 Anything declared "done" without this gate is not done.
 
+## Local git hooks
+
+The repo pins local git hooks in `git-hooks/`, activated per-clone by `scripts/install-hooks.sh`. A single explicit command (`scripts/install-hooks.sh`) sets `core.hooksPath` and activates them — no per-machine manual copying. Each hook enforces one thing:
+
+- `git-hooks/commit-msg` — Conventional Commits (allowed types: `feat|fix|chore|docs|refactor|test`, optional scope).
+- `git-hooks/pre-commit` — gitleaks staged scan via `.gitleaks/setmeup.toml`; **fails closed** when gitleaks is absent (blocks the commit with install instructions).
+- `git-hooks/pre-push` — done-gate preflight (`cargo fmt --check`, `clippy --all-targets --all-features -- -D warnings`, `cargo test`) when `Cargo.toml` exists.
+
+Install/verify: `scripts/install-hooks.sh` (idempotent, re-runnable, `--verify` flag); `scripts/verify-hooks.sh`.
+
+**Framing: friction-reduction + prevention, not security.** Bypass is trivially possible (`git commit --no-verify` / `git push --no-verify`). The hard gates are branch protection and CI required checks. Bypass is an accepted overridable escape hatch, not a secret path.
+
+**Trust boundary:** Hooks never affect the delivery bootstrap. `bootstrap.sh` never executes any file from the working directory and never installs hooks — hook installation is purely an explicit developer action.
+
 ## Global engineering principles (compose, don't duplicate)
 
 The shared engineering principles from `~/.config/opencode/AGENTS.md` apply here as read-only reference: SOLID, YAGNI, testing discipline (everything testable must be tested), idempotency, minimal dependencies, exact version pinning, conventional commits, focused/small commits, and security hygiene. Do not rewrite them here — cite them as governing.

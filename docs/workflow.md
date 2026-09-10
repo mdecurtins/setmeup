@@ -63,6 +63,17 @@ The gates above are not just policy — they are enforced GitHub-side (`dev-prot
 - **Dependabot.** Monthly cadence for `cargo` and `github-actions` (no npm — no `package.json`), grouped into single PRs per ecosystem to reduce noise.
 - **Agent review (approval-equivalent gate).** `.github/workflows/agent-review.yml` + `.github/scripts/agent-review.py` run the **adversarial agent review** as a required status check: a model reviews the PR diff and OpenSpec change artifacts against the checklist and the job reports a green/red check. The check's exit code IS the merge gate — functionally an approval, without a review event. The workflow triggers on `pull_request_target`, so it runs **trusted code from the default branch**: it checks out only the base SHA and reads PR evidence via the GitHub API, so a PR can never modify its own reviewer or reach the `OPENROUTER_API_KEY` (scoped to the `setmeup_ci` environment). Fork PRs are skipped (external contributions use the human review gate). The script polls the four quality checks (bounded) before reviewing and is fail-closed (no green checks / missing key / malformed verdict ⇒ red); the system prompt treats PR text as untrusted evidence against prompt injection. Dormant behind `vars.AGENT_REVIEWER_ENABLED`; the maintainer provisions the key, observes a live pass on a PR after this workflow is merged to `main`, then adds `agent-review` to the required checks (`tasks.md` 7.4 of dev-protection). No GitHub App or second identity is involved. Honest caveat: the checklist is automated, so the substantive review remains the process gate (`pr-review` skill).
 
+### Local hooks (prevention, not security)
+
+The repo pins local git hooks in `git-hooks/` for per-clone active/dev-time install. These are friction-reduction + prevention, not security — bypass is trivially possible (`git commit --no-verify` / `git push --no-verify`); the hard gates are branch protection and CI required checks.
+
+- **Install/verify.** One explicit developer action: `scripts/install-hooks.sh` (idempotent, re-runnable, `--verify` flag); `scripts/verify-hooks.sh` for a standalone check.
+- **commit-msg** — enforces Conventional Commits (allowed types `feat|fix|chore|docs|refactor|test`, optional scope).
+- **pre-commit** — runs gitleaks against `.gitleaks/setmeup.toml` on staged content; **fails closed** when gitleaks is absent (blocks the commit with install instructions). Push-time CI detection is too late once a secret is in git history.
+- **pre-push** — done-gate preflight (`cargo fmt --check`, `clippy --all-targets --all-features -- -D warnings`, `cargo test`) only when a `Cargo.toml` is present.
+
+**Trust boundary:** The delivery bootstrap (`bootstrap.sh`, `curl | sh`) never installs hooks and never executes any file from the caller's working directory. Hook installation is purely an explicit developer action — `bootstrap.sh` never reads `core.hooksPath` or any working-directory content beyond what is necessary for the Windows hand-off path (which is inert under `curl | sh`).
+
 ## The pieces, and where they live
 
 | Concern | Location |
@@ -72,6 +83,7 @@ The gates above are not just policy — they are enforced GitHub-side (`dev-prot
 | Project context for artifacts | `openspec/config.yaml` |
 | Project skills (curated) | `.opencode/skills/` — `probe-verify`, `done-checklist`, `pr-review`, plus the OpenSpec skills |
 | CI / enforcement | `.github/workflows/ci.yml` + `.gitleaks/setmeup.toml`; enforced via branch protection, squash-only settings, CODEOWNERS (`.github/CODEOWNERS`), Dependabot (`.github/dependabot.yml`) |
+| Local git hooks | `git-hooks/` + `scripts/install-hooks.sh` (per-clone activation) |
 | This story | `docs/workflow.md` |
 
 ## Conventions honored by reference

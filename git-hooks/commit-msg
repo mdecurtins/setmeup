@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+#
+# commit-msg — conventional-commit enforcement hook
+#
+# Rejects commit messages that do not match the conventional-commit format:
+#   type(scope): subject
+# where type is one of: feat, fix, chore, docs, refactor, test
+# and scope (when present) is [a-z0-9-]+.
+#
+# Merge commits (detected via MERGE_MSG marker) and empty messages
+# (aborted commits) are always allowed.
+
+set -eu
+
+ALLOWED_TYPES='feat|fix|chore|docs|refactor|test'
+MSG_FILE="${1:?commit-msg: missing commit message file argument}"
+
+# Allow merge commits: git writes MERGE_MSG during merge conflicts.
+if [ -f "$(git rev-parse --git-dir)/MERGE_MSG" ]; then
+	exit 0
+fi
+
+# Allow if the commit message file cannot be read (e.g. git internal
+# state). Also allows empty messages (aborted commit).
+first_line=""
+if [ -r "$MSG_FILE" ]; then
+	read -r first_line <"$MSG_FILE" || true
+fi
+if [ -z "$first_line" ]; then
+	exit 0
+fi
+
+# Check conventional-commit pattern: type or type(scope): subject
+if echo "$first_line" | grep -qE "^($ALLOWED_TYPES)(\([a-z0-9-]+\))?: .+$"; then
+	exit 0
+fi
+
+printf 'ERROR: commit message does not follow conventional-commit format.\n' >&2
+printf '  Got: %s\n' "$first_line" >&2
+printf '\n' >&2
+printf '  Expected: type[(scope)]: subject\n' >&2
+printf '  Allowed types: %s\n' >&2 "$(printf '%s' "$ALLOWED_TYPES" | tr '|' ', ')"
+printf '\n' >&2
+printf '  Example: feat(auth): add login endpoint\n' >&2
+exit 1
