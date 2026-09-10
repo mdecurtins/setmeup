@@ -26,6 +26,7 @@ Review the PR against all four items and record the outcome for each:
 - **Review the diff, not the description.** Claims in the PR body are inputs; actual code is evidence.
 - **Be specific.** "LGTM" is not a review record; name what you checked and what you found (or didn't).
 - **Record the outcome.** State which items passed and any findings, so the review is auditable in the PR thread.
+- **Run the pre-PR gate.** Before declaring a review pass or opening the PR, load the `ci-gate` skill and run its pre-PR checklist.
 
 ## Maintenance
 
