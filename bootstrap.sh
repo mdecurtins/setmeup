@@ -22,13 +22,6 @@ die() {
 	exit 1
 }
 
-# Script dir (empty when piped via `curl ... | sh`); used for Windows
-# hand-off only.
-script_dir='.'
-if [ -f "$0" ]; then
-	script_dir="$(cd "$(dirname "$0")" && pwd)"
-fi
-
 # WSL kernels expose an interop marker and a Microsoft-branded kernel version.
 is_wsl() {
 	[ -f '/proc/sys/fs/binfmt_misc/WSLInterop' ] && return 0
@@ -95,32 +88,21 @@ unix_bootstrap() {
 	exec "$BIN_NAME" "$WIZARD_COMMAND"
 }
 
-# WSL2 auto-mounts Windows drives at /mnt/<drive-letter>; map a path onto it.
-wsl_make_path() {
-	_win_path="$1"
-	_drive="$(printf '%s' "$_win_path" | cut -c1 | tr '[:upper:]' '[:lower:]')"
-	_rest="$(printf '%s' "$_win_path" | cut -c3-)"
-	printf '/mnt/%s/%s\n' "$_drive" "$(printf '%s' "$_rest" | sed 's|\\|/|g')"
-}
-
 # `wsl --list --quiet` prints one line per distro; nothing means "not set up".
 wsl_has_distro() {
 	_wsl_distros="$(MSYS2_ARG_CONV_EXCL='*' wsl.exe --list --quiet 2>/dev/null || true)"
 	[ -n "$_wsl_distros" ]
 }
 
-# Re-run this script inside WSL2 (MSYS2_ARG_CONV_EXCL stops Git Bash from
-# rewriting the /mnt/... path arguments).
+# Windows / Git Bash: print the WSL2 hand-off instructions without executing
+# anything from the working directory. The delivery path (`curl | sh`) must
+# never execute a local file, so we never re-run a local bootstrap.sh here.
 windows_run_in_wsl() {
-	if [ -f "$0" ]; then
-		_wsl_script="$(wsl_make_path "$(cygpath -w "$script_dir/$(basename "$0")")")"
-		printf 'bootstrap: handing off to WSL2 (%s)\n' "$_wsl_script"
-		if MSYS2_ARG_CONV_EXCL='*' wsl.exe bash -lc "exec /bin/sh '$_wsl_script'"; then
-			return 0
-		fi
-		print_err "bootstrap.sh not reachable from inside WSL2 (mapped to $_wsl_script)"
-	fi
-	printf '%s\n' 'Open a WSL2 terminal and run the Unix bootstrap there:' '' "  curl -fsSL '$RAW_URL' | sh"
+	printf '%s\n' \
+		'bootstrap: setmeup requires WSL2 (Git Bash is not supported).' \
+		'Open a WSL2 terminal and run the Unix bootstrap there:' \
+		'' \
+		"  curl -fsSL '$RAW_URL' | sh"
 	return 0
 }
 
