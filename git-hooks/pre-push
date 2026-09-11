@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+#
+# pre-push — done-gate preflight on push
+#
+# Runs cargo fmt --check, clippy (--all-targets --all-features -D warnings),
+# and cargo test when Cargo.toml exists at the repo root. If any gate fails,
+# the push is blocked.
+
+set -eu
+
+repo_top="$(git rev-parse --show-toplevel)"
+
+# Skip cargo gates when no Cargo.toml exists.
+if [ ! -f "$repo_top/Cargo.toml" ]; then
+	exit 0
+fi
+
+cd "$repo_top"
+
+printf 'pre-push: running cargo fmt --check ...\n'
+if ! cargo fmt --check; then
+	printf 'ERROR: pre-push — cargo fmt --check failed.\n' >&2
+	exit 1
+fi
+
+printf 'pre-push: running clippy ...\n'
+if ! cargo clippy --all-targets --all-features -- -D warnings; then
+	printf 'ERROR: pre-push — clippy failed.\n' >&2
+	exit 1
+fi
+
+printf 'pre-push: running cargo test ...\n'
+if ! cargo test; then
+	printf 'ERROR: pre-push — cargo test failed.\n' >&2
+	exit 1
+fi
+
+printf 'pre-push: all gates passed.\n'

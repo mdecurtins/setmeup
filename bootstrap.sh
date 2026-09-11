@@ -4,9 +4,10 @@
 # binary on a fresh machine and hands off to the first-run wizard
 # (`setmeup configure`). Provisioning logic lives in the binary, never here.
 #
-# Ubuntu/WSL2 & macOS: ensure the Rust toolchain (if missing), build from
-# source, launch the wizard. Windows: delegate to WSL2 (installing it first
-# if missing). Git Bash is never a supported environment.
+# Ubuntu/WSL2 & macOS: ensure the Rust toolchain (if missing), install
+# from source via `cargo install --git`, launch the wizard. Windows:
+# delegate to WSL2 (installing it first if missing). Git Bash is never a
+# supported environment.
 
 set -eu
 
@@ -20,12 +21,6 @@ die() {
 	print_err "$*"
 	exit 1
 }
-
-# Script dir (empty when piped via `curl ... | sh`): lets us detect a clone.
-script_dir='.'
-if [ -f "$0" ]; then
-	script_dir="$(cd "$(dirname "$0")" && pwd)"
-fi
 
 # WSL kernels expose an interop marker and a Microsoft-branded kernel version.
 is_wsl() {
@@ -67,49 +62,30 @@ install_cargo_if_missing() {
 	fi
 }
 
-# Install the fresh binary beside cargo: ~/.cargo/bin, /usr/local/bin, or in place.
-install_binary() {
-	_bin_src="$1"
-	if [ -d "$HOME/.cargo/bin" ]; then
-		_bin_dir="$HOME/.cargo/bin"
-	elif [ -w '/usr/local/bin' ]; then
-		_bin_dir='/usr/local/bin'
-	else
-		_bin_dir="$(dirname "$(command -v cargo)")"
-	fi
-	install -m 0755 "$_bin_src" "$_bin_dir/$BIN_NAME"
-	export PATH="$_bin_dir:$PATH"
-	printf 'bootstrap: installed %s at %s\n' "$BIN_NAME" "$_bin_dir/$BIN_NAME"
-}
-
 ensure_binary() {
-	if [ -f "$script_dir/Cargo.toml" ]; then
-		# Build local sources in place; avoids re-cloning via `cargo install`.
-		printf 'bootstrap: local checkout detected — building from %s\n' "$script_dir"
-		cargo build --release --manifest-path "$script_dir/Cargo.toml"
-		install_binary "$script_dir/target/release/$BIN_NAME"
-	else
-		printf 'bootstrap: building %s from %s\n' "$BIN_NAME" "$REPO_URL"
-		cargo install --git "$REPO_URL"
-	fi
+	# Use a per-user temp directory. /tmp is world-writable — another user
+	# could drop a .cargo/config.toml under /tmp that cargo would discover
+	# via ancestor traversal. $HOME/.cache is per-user and trusted.
+	mkdir -p "$HOME/.cache"
+	_tmp_dir="$(mktemp -d "$HOME/.cache/setmeup-install-XXXXXX")"
+	trap 'rm -rf "$_tmp_dir"' 0 1 2 3 15
+	cd "$_tmp_dir"
+
+	printf 'bootstrap: building %s from %s\n' "$BIN_NAME" "$REPO_URL"
+	cargo install --git "$REPO_URL"
 }
 
 # Unix path for Ubuntu/WSL2/macOS: toolchain, build, wizard exec.
 unix_bootstrap() {
 	install_cargo_if_missing
 	ensure_binary
+	# cargo install --git places the binary in ~/.cargo/bin, which may not be
+	# on PATH in a piped shell context. Extend PATH so the wizard is found.
+	export PATH="$HOME/.cargo/bin:$PATH"
 	if ! command -v "$BIN_NAME" >/dev/null 2>&1; then
 		die "install done but $BIN_NAME is not on PATH — open a new shell and run '$BIN_NAME $WIZARD_COMMAND'"
 	fi
 	exec "$BIN_NAME" "$WIZARD_COMMAND"
-}
-
-# WSL2 auto-mounts Windows drives at /mnt/<drive-letter>; map a path onto it.
-wsl_make_path() {
-	_win_path="$1"
-	_drive="$(printf '%s' "$_win_path" | cut -c1 | tr '[:upper:]' '[:lower:]')"
-	_rest="$(printf '%s' "$_win_path" | cut -c3-)"
-	printf '/mnt/%s/%s\n' "$_drive" "$(printf '%s' "$_rest" | sed 's|\\|/|g')"
 }
 
 # `wsl --list --quiet` prints one line per distro; nothing means "not set up".
@@ -118,18 +94,15 @@ wsl_has_distro() {
 	[ -n "$_wsl_distros" ]
 }
 
-# Re-run this script inside WSL2 (MSYS2_ARG_CONV_EXCL stops Git Bash from
-# rewriting the /mnt/... path arguments).
+# Windows / Git Bash: print the WSL2 hand-off instructions without executing
+# anything from the working directory. The delivery path (`curl | sh`) must
+# never execute a local file, so we never re-run a local bootstrap.sh here.
 windows_run_in_wsl() {
-	if [ -f "$0" ]; then
-		_wsl_script="$(wsl_make_path "$(cygpath -w "$script_dir/$(basename "$0")")")"
-		printf 'bootstrap: handing off to WSL2 (%s)\n' "$_wsl_script"
-		if MSYS2_ARG_CONV_EXCL='*' wsl.exe bash -lc "exec /bin/sh '$_wsl_script'"; then
-			return 0
-		fi
-		print_err "bootstrap.sh not reachable from inside WSL2 (mapped to $_wsl_script)"
-	fi
-	printf '%s\n' 'Open a WSL2 terminal and run the Unix bootstrap there:' '' "  curl -fsSL '$RAW_URL' | sh"
+	printf '%s\n' \
+		'bootstrap: setmeup requires WSL2 (Git Bash is not supported).' \
+		'Open a WSL2 terminal and run the Unix bootstrap there:' \
+		'' \
+		"  curl -fsSL '$RAW_URL' | sh"
 	return 0
 }
 

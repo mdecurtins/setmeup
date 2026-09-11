@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+#
+# pre-commit — secret prevention at staging time
+#
+# Runs gitleaks against staged content. If gitleaks is not installed,
+# the commit is blocked with install instructions (fail-closed).
+
+set -eu
+
+GITLEAKS_CONFIG='.gitleaks/setmeup.toml'
+
+# Nothing staged — nothing to scan.
+if git diff --cached --quiet; then
+	exit 0
+fi
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+	cat >&2 <<-EOF
+		ERROR: gitleaks is not installed.
+
+		Install it with one of:
+		  brew install gitleaks
+		  cargo install gitleaks-cli
+
+		Then retry the commit.
+
+		This hook blocks commits when gitleaks is absent. To bypass (not
+		recommended): git commit --no-verify
+
+	EOF
+	exit 1
+fi
+
+repo_top="$(git rev-parse --show-toplevel)"
+found_secrets=0
+
+# Probe: check whether the installed gitleaks supports the 'protect' subcommand.
+if gitleaks protect --help >/dev/null 2>&1; then
+	gitleaks protect --staged --config="$repo_top/$GITLEAKS_CONFIG" || found_secrets=1
+else
+	# Fallback for older gitleaks versions.
+	gitleaks detect --source="$repo_top" --config="$repo_top/$GITLEAKS_CONFIG" --staged || found_secrets=1
+fi
+
+if [ "$found_secrets" -eq 1 ]; then
+	printf 'ERROR: pre-commit — gitleaks detected potential secrets in staged changes.\n' >&2
+	printf 'If this is a false positive, update .gitleaks/setmeup.toml allowlist.\n' >&2
+	exit 1
+fi
