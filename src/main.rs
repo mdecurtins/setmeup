@@ -1,6 +1,5 @@
 //! setmeup executable entry point.
 
-use std::io::{IsTerminal, Write};
 use std::path::Path;
 use std::sync::mpsc;
 
@@ -10,7 +9,7 @@ use setmeup::cli::{Cli, Command, KeysAction, SecretsAction};
 use setmeup::config;
 use setmeup::error::{Result, SetmeupError};
 use setmeup::identity;
-use setmeup::manifest::{Manifest, Os, SecretAcquire, SecretBackend as ManifestSecretBackend};
+use setmeup::manifest::{Manifest, Os};
 use setmeup::provisioning;
 use setmeup::secrets::{
     self, BackendKind, EnvPassphraseProvider, PassphraseProvider, SecretBackend,
@@ -388,36 +387,4 @@ fn secret_passphrase() -> Result<age::secrecy::SecretString> {
 fn try_github_token() -> Option<String> {
     let backend = default_secret_backend().ok()?;
     backend.get("github_token").ok()
-}
-
-// Re-export guard so the manifest backends enum is referenced (keeps imports honest).
-#[allow(dead_code)]
-fn _manifest_backend_to_secrets(b: ManifestSecretBackend) -> BackendKind {
-    match b {
-        ManifestSecretBackend::VaultFile => BackendKind::VaultFile,
-        ManifestSecretBackend::Keyring => BackendKind::Keyring,
-    }
-}
-
-#[allow(dead_code)]
-fn _secret_acquire_to_hint(a: SecretAcquire) -> &'static str {
-    match a {
-        SecretAcquire::Paste => "paste",
-        SecretAcquire::DeviceFlow => "device-flow",
-        SecretAcquire::Env => "env",
-    }
-}
-
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-#[allow(dead_code)]
-fn _is_tty() -> bool {
-    std::io::stdin().is_terminal()
-}
-
-#[allow(dead_code)]
-fn _flush() -> Result<()> {
-    std::io::stdout().flush().map_err(SetmeupError::Io)
 }
