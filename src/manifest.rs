@@ -102,12 +102,90 @@ pub struct Dotfile {
     pub dest: String,
 }
 
+/// Configuration for a single package in the manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct PackageConfig {
+    #[serde(default)]
+    pub from: Option<String>, // apt, brew, winget, pip, download — None = per-OS default
+    #[serde(default)]
+    pub depends: Vec<String>, // package names that must be provisioned first
+    #[serde(default)]
+    pub apt: Option<String>, // override apt package name
+    #[serde(default)]
+    pub brew: Option<String>, // override brew package name
+    #[serde(default)]
+    pub winget: Option<String>, // override winget package name
+}
+
+/// NVM (Node Version Manager) configuration.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct NvmConfig {
+    #[serde(default)]
+    pub node_version: String, // default "lts/*"
+    #[serde(default)]
+    pub global_packages: Vec<String>,
+}
+
+/// Rust toolchain configuration via rustup.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RustupConfig {
+    #[serde(default)]
+    pub toolchain: String, // default "stable"
+}
+
+/// Repository to clone (map key is the name, value is the URL).
+pub type ReposConfig = BTreeMap<String, String>;
+
+/// Aliases (map key is alias name, value is command).
+pub type AliasesConfig = BTreeMap<String, String>;
+
+/// A single managed configuration file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ConfigFile {
+    pub path: String,
+    pub content: String,
+    #[serde(default)]
+    pub strategy: ConfigStrategy,
+}
+
+/// Strategy for managing an existing config file.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConfigStrategy {
+    #[default]
+    CreateOnly,
+    OverwriteManaged,
+    Merge,
+}
+
+/// A named shell function body.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ShellFunction {
+    pub name: String,
+    pub body: String,
+}
+
 /// Shell configuration to apply (idempotently) to the user's rc file.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ShellConfig {
     #[serde(default)]
     pub rc_lines: Vec<String>,
+    #[serde(default)]
+    pub prompt: bool,
+    #[serde(default)]
+    pub functions: Vec<ShellFunction>,
+    #[serde(default)]
+    pub source: Vec<String>,
+    #[serde(default)]
+    pub path_extend: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
 }
 
 /// OS-level preferences (currently minimal by design).
@@ -149,6 +227,20 @@ pub struct Manifest {
     /// Extra free-form config for custom scripts (forward-compatible).
     #[serde(default)]
     pub extra: BTreeMap<String, String>,
+
+    // V2 fields
+    #[serde(default)]
+    pub packages: Option<BTreeMap<String, PackageConfig>>,
+    #[serde(default)]
+    pub nvm: Option<NvmConfig>,
+    #[serde(default)]
+    pub rustup: Option<RustupConfig>,
+    #[serde(default)]
+    pub repos: Option<ReposConfig>,
+    #[serde(default)]
+    pub aliases: Option<AliasesConfig>,
+    #[serde(default)]
+    pub configs: Option<BTreeMap<String, ConfigFile>>,
 }
 
 impl Manifest {
@@ -213,19 +305,101 @@ impl Manifest {
                 ));
             }
         }
+        // Validate packages
+        if let Some(ref packages) = self.packages {
+            for (name, cfg) in packages {
+                if name.trim().is_empty() {
+                    return Err(SetmeupError::Manifest(
+                        "packages: name must not be empty".into(),
+                    ));
+                }
+                if let Some(ref from) = cfg.from {
+                    match from.as_str() {
+                        "apt" | "brew" | "winget" | "pip" | "download" => {}
+                        _ => {
+                            return Err(SetmeupError::Manifest(format!(
+                                "packages: unknown from method '{from}' for '{name}'"
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+        // Validate nvm
+        if let Some(ref nvm) = self.nvm
+            && nvm.node_version.trim().is_empty()
+        {
+            return Err(SetmeupError::Manifest(
+                "nvm: node_version must not be empty".into(),
+            ));
+        }
+        // Validate aliases
+        if let Some(ref aliases) = self.aliases {
+            for name in aliases.keys() {
+                if name.trim().is_empty() {
+                    return Err(SetmeupError::Manifest(
+                        "aliases: name must not be empty".into(),
+                    ));
+                }
+            }
+        }
+        // Validate configs
+        if let Some(ref configs) = self.configs {
+            for (name, cfg) in configs {
+                if cfg.path.trim().is_empty() {
+                    return Err(SetmeupError::Manifest(format!(
+                        "configs: path must not be empty for '{name}'"
+                    )));
+                }
+                // Reject overwrite-managed for formats that don't support comments
+                if cfg.strategy == ConfigStrategy::OverwriteManaged {
+                    let path_lower = cfg.path.to_lowercase();
+                    if path_lower.ends_with(".json") || path_lower.ends_with(".xml") {
+                        return Err(SetmeupError::Manifest(format!(
+                            "configs: overwrite-managed is not valid for JSON/XML config '{name}'"
+                        )));
+                    }
+                }
+            }
+        }
         Ok(())
+    }
+
+    /// Migrate V1 fields to V2. Returns a new Manifest with V2 fields populated
+    /// from V1 sources when V2 fields are absent.
+    pub fn migrate_v1(&self) -> Manifest {
+        let mut m = self.clone();
+        // If no packages declared, desugar from tools
+        if m.packages.is_none() && !m.tools.is_empty() {
+            let mut pkgs = BTreeMap::new();
+            for t in &m.tools {
+                pkgs.insert(
+                    t.name.clone(),
+                    PackageConfig {
+                        from: None,
+                        depends: Vec::new(),
+                        apt: t.apt.clone(),
+                        brew: t.brew.clone(),
+                        winget: t.winget.clone(),
+                    },
+                );
+            }
+            m.packages = Some(pkgs);
+        }
+        m
     }
 
     /// Resolve the manifest for a specific OS (used by provisioning).
     pub fn resolve_for(&self, os: Os) -> ResolvedManifest {
+        let m = self.migrate_v1();
         ResolvedManifest {
-            packages: self
+            packages: m
                 .tools
                 .iter()
                 .map(|t| (t.name.clone(), t.package_name_for(os).to_owned()))
                 .collect(),
-            dotfiles: self.dotfiles.clone(),
-            shell: self.shell.clone(),
+            dotfiles: m.dotfiles.clone(),
+            shell: m.shell.clone(),
         }
     }
 }
@@ -333,5 +507,74 @@ secrets:
         let yaml = m.to_yaml().unwrap();
         let m2 = Manifest::from_yaml(&yaml).unwrap();
         assert_eq!(m, m2);
+    }
+
+    #[test]
+    fn parses_v2_sample_manifest() {
+        let yaml = r#"
+packages:
+  git: {}
+  ffmpeg:
+    from: download
+nvm:
+  node-version: lts/*
+rustup:
+  toolchain: stable
+repos:
+  myrepo: "github.com/user/repo"
+aliases:
+  ll: "ls -la"
+configs:
+  yt-dlp:
+    path: "~/.config/yt-dlp/config"
+    strategy: create-only
+    content: "-o ~/downloads/%(title)s.%(ext)s"
+shell:
+  prompt: true
+"#;
+        let m = Manifest::from_yaml(yaml).expect("valid V2 manifest");
+        assert!(m.packages.is_some());
+        assert!(m.nvm.is_some());
+        assert!(m.rustup.is_some());
+        assert!(m.repos.is_some());
+        assert!(m.aliases.is_some());
+        assert!(m.configs.is_some());
+        assert_eq!(m.nvm.as_ref().unwrap().node_version, "lts/*");
+    }
+
+    #[test]
+    fn backward_compat_tools_to_packages() {
+        let yaml = r#"
+tools:
+  - name: git
+    apt: git
+shell:
+  rc-lines: []
+"#;
+        let m = Manifest::from_yaml(yaml).expect("V1 manifest");
+        let migrated = m.migrate_v1();
+        assert!(migrated.packages.is_some());
+        assert!(migrated.packages.as_ref().unwrap().contains_key("git"));
+    }
+
+    #[test]
+    fn rejects_overwrite_managed_for_json() {
+        let yaml = r#"
+configs:
+  vscode:
+    path: "~/.config/Code/settings.json"
+    strategy: overwrite-managed
+    content: "{}"
+"#;
+        let err = Manifest::from_yaml(yaml).expect_err("must reject");
+        assert!(err.to_string().contains("overwrite-managed"));
+    }
+
+    #[test]
+    fn empty_v2_manifest_applies_cleanly() {
+        let m = Manifest::default();
+        m.validate().unwrap();
+        assert!(m.packages.is_none());
+        assert!(m.nvm.is_none());
     }
 }
