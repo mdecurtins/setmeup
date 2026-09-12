@@ -1,19 +1,77 @@
 # tui Specification
 
 ## Purpose
-TBD - created by archiving change setmeup-core. Update Purpose after archive.
+
+Provide a linear, full-screen TUI wizard for authoring the manifest and a live dashboard for observing apply runs. The wizard uses crossterm (not ratatui) and interactive terminal primitives.
+
 ## Requirements
+
 ### Requirement: Wizard authors the manifest
-The TUI SHALL provide a wizard that collects configuration into the declarative manifest, not directly into the system.
+The TUI SHALL provide a wizard that collects configuration into the declarative manifest, not directly into the system. The wizard is a 6-step linear interactive flow using crossterm. The `configure` command writes the manifest; it does not provision the system.
 
 #### Scenario: First-run wizard writes a manifest
-- **WHEN** a user runs `setmeup configure` (wizard-lite) on a machine with no manifest
-- **THEN** an empty manifest is validated and written to manifest.yml, and no system provisioning happens during the wizard
+- **WHEN** a user runs `setmeup configure` on a machine with no manifest
+- **THEN** the wizard collects preferences across 6 steps, validates, and writes `manifest.yml` to the config directory
 
 #### Scenario: Wizard edits an existing manifest
 - **WHEN** a user runs `setmeup configure` against an existing manifest
-- **THEN** the existing manifest is loaded, validated, and saved on completion (pre-filled editing)
-- **NOTE** — full interactive wizard screens (identity/credential/tool/dotfiles/shell/review) are deferred to follow-up #20 and are NOT part of this change's contract.
+- **THEN** each step pre-fills from the existing manifest; the user confirms or changes values before saving
+
+### Requirement: Linear wizard with progress bar
+The `configure` command SHALL launch a 6-step linear wizard. Each step fills the terminal and shows a progress bar at the top.
+
+#### Scenario: Wizard renders progress bar
+- **WHEN** the wizard is on step 3 of 6
+- **THEN** the progress bar shows 50% filled and the step label "3 of 6"
+
+#### Scenario: Wizard navigates forward
+- **WHEN** a user completes a step (Enter on a selected option, or fills the required input)
+- **THEN** the next step is rendered full-screen
+
+#### Scenario: Wizard navigates backward
+- **WHEN** a user presses Escape or selects "Back"
+- **THEN** the previous step is rendered with its prior state preserved
+
+### Requirement: Wizard steps
+The wizard SHALL have these steps in order:
+
+| Step | Title | Content |
+|------|-------|---------|
+| 1 | Welcome | Introduction, info message about what setmeup does |
+| 2 | Credentials | Secret acquisition policy (paste/device-flow/env) for each declared credential; masked input for paste policy |
+| 3 | Packages | Tool selection: list of pre-configured packages with toggles, `from` method shown |
+| 4 | Repos | Repository URLs to clone; free-text input with add/remove |
+| 5 | Shell | Shell customization: prompt toggle, function names (body deferred), PATH extends, env vars |
+| 6 | Review | Summary of all selections; confirm to write manifest |
+
+#### Scenario: Step content uses defaults-first
+- **WHEN** a manifest already exists (from a prior run)
+- **THEN** each step pre-fills from the existing manifest; user confirms or changes
+
+#### Scenario: Wizard validates on advance
+- **WHEN** a user attempts to advance past a step with invalid input
+- **THEN** validation error is shown on screen and advance is blocked until fixed
+
+### Requirement: Wizard handles terminal resize
+The wizard SHALL handle SIGWINCH (terminal resize) events via crossterm's event stream, redrawing the current step at the new terminal dimensions.
+
+#### Scenario: Terminal resized during wizard
+- **WHEN** a user resizes the terminal window during a wizard step
+- **THEN** the wizard redraws the step content to fit the new dimensions without garbling the display or losing input state
+
+### Requirement: Spinner for async operations
+The wizard SHALL show a spinner during operations that may block (credential validation, network checks).
+
+#### Scenario: Credential validation shows spinner
+- **WHEN** the wizard validates a pasted token against the provider API
+- **THEN** a spinner is shown with the label "Validating token..." until complete
+
+### Requirement: Non-TTY degradation
+When stdin is not a terminal, the wizard SHALL error with a clear message directing the user to non-interactive modes (manifest file directly).
+
+#### Scenario: Wizard errors in non-TTY
+- **WHEN** `setmeup configure` is run in a piped/CI context
+- **THEN** the wizard prints an error and exits non-zero without hanging
 
 ### Requirement: Dashboard observes apply runs
 The TUI SHALL provide a dashboard view showing live progress and per-item outcome during `apply`.
@@ -36,7 +94,7 @@ The wizard SHALL render the appropriate prompt type for each credential based on
 #### Scenario: Device-flow credential
 - **WHEN** a credential is declared with `via: device-flow`
 - **THEN** the wizard shows a code and URL for browser authorization and polls for completion
-- **NOTE** — device-flow rendering is deferred to follow-up #19 and is NOT part of this change's contract.
+- **NOTE** — device-flow rendering is deferred to follow-up #19
 
 ### Requirement: Secrets are masked
 The wizard SHALL mask all secret input and SHALL NOT surface stored secrets in plaintext.
@@ -44,4 +102,3 @@ The wizard SHALL mask all secret input and SHALL NOT surface stored secrets in p
 #### Scenario: Token entry is masked
 - **WHEN** a user enters a token in the wizard
 - **THEN** it is displayed masked and never echoed to output
-
