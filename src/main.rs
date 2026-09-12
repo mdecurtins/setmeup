@@ -118,7 +118,7 @@ fn cmd_apply(dry_run: bool, json: bool) -> Result<i32> {
         };
 
     // Run provisioning synchronously, feeding the channel.
-    let results = provisioning::provision(os, &repo_root, &manifest, None)?;
+    let results = provisioning::provision(os, &repo_root, &manifest)?;
     let mut has_failure = false;
     for r in &results {
         match &r.status {
