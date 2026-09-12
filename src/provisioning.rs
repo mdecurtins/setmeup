@@ -156,6 +156,28 @@ fn has_source_line(rc: &Path, src_path: &Path, home: &Path) -> Result<bool> {
     Ok(lines.iter().any(|l| l == &expected))
 }
 
+/// Escape a value for use inside double quotes in shell.
+/// Backslash and double-quote are escaped with a backslash prefix.
+fn escape_double_quoted(val: &str) -> String {
+    let mut escaped = String::with_capacity(val.len());
+    for c in val.chars() {
+        match c {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '$' => escaped.push_str("\\$"),
+            '`' => escaped.push_str("\\`"),
+            _ => escaped.push(c),
+        }
+    }
+    escaped
+}
+
+/// Escape a value for use inside single quotes in shell.
+/// Single quotes are terminated, an escaped quote is inserted, then resumed.
+fn escape_single_quoted(val: &str) -> String {
+    val.replace('\'', "'\\''")
+}
+
 /// Build the shell-functions.sh content from declared functions.
 fn build_functions_content(functions: &[ShellFunction]) -> String {
     let mut content = String::from(SETMEUP_HEADER);
@@ -310,7 +332,7 @@ pub fn check_shell(manifest: &Manifest, ctx: &ProvisionContext) -> Result<CheckR
 
     // Check env vars.
     for (key, val) in &manifest.shell.env {
-        let export_line = format!("export {key}={val}");
+        let export_line = format!("export {key}=\"{}\"", escape_double_quoted(val));
         let lines = read_lines(&rc)?;
         if !lines.iter().any(|l| l.trim() == export_line) {
             return Ok(CheckResult::NeedsProvision);
@@ -388,7 +410,7 @@ pub fn provision_shell(
 
     // --- Env vars ---
     for (key, val) in &manifest.shell.env {
-        let line = format!("export {key}={val}");
+        let line = format!("export {key}=\"{}\"", escape_double_quoted(val));
         append_line_idempotent(&rc, &line)?;
         results.push(ProvisionResult {
             item: format!("shell-env:{}", key),
@@ -451,7 +473,7 @@ pub fn check_aliases(
 
     // Check each declared alias appears.
     for (name, command) in aliases {
-        let expected_line = format!("alias {name}=\"{command}\"");
+        let expected_line = format!("alias {name}='{}'", escape_single_quoted(command));
         if !content.contains(&expected_line) {
             return Ok(CheckResult::Divergent(format!(
                 "alias '{name}' differs or is missing"
@@ -462,7 +484,7 @@ pub fn check_aliases(
     // Check if there are extra aliases in the file (also divergent).
     let declared_set: std::collections::HashSet<String> = aliases
         .iter()
-        .map(|(n, c)| format!("alias {n}=\"{c}\""))
+        .map(|(n, c)| format!("alias {n}='{}'", escape_single_quoted(c)))
         .collect();
     for line in content.lines() {
         let trimmed = line.trim();
@@ -501,8 +523,12 @@ pub fn provision_aliases(
     let mut content = String::from(SETMEUP_HEADER);
     content.push('\n');
     for (name, command) in aliases {
-        // Use double quotes around the command.
-        content.push_str(&format!("alias {name}=\"{command}\"\n"));
+        // Use single quotes around the command to prevent $ expansion.
+        // Embedded single quotes are escaped via '\'' (end-quote, escaped-quote, re-open-quote).
+        content.push_str(&format!(
+            "alias {name}='{}'\n",
+            escape_single_quoted(command)
+        ));
     }
     fs::write(&aliases_path, &content)?;
     results.push(ProvisionResult {
@@ -969,8 +995,34 @@ pub fn provision(os: Os, repo_root: &Path, manifest: &Manifest) -> Result<Vec<Pr
                 CheckResult::NeedsProvision => {
                     // For shell/aliases/configs, call the specialized helpers that have manifest access.
                     let dispatch_results = match section {
-                        "shell" => match provision_shell(manifest, &ctx) {
-                            Ok(r) => r,
+                        "shell" => match check_shell(manifest, &ctx) {
+                            Ok(CheckResult::Satisfied) => {
+                                vec![ProvisionResult {
+                                    item: section.into(),
+                                    status: ItemStatus::Satisfied,
+                                }]
+                            }
+                            Ok(CheckResult::NeedsProvision) => {
+                                match provision_shell(manifest, &ctx) {
+                                    Ok(r) => r,
+                                    Err(e) => vec![ProvisionResult {
+                                        item: section.into(),
+                                        status: ItemStatus::Failed(e.to_string()),
+                                    }],
+                                }
+                            }
+                            Ok(CheckResult::Divergent(d)) => {
+                                vec![ProvisionResult {
+                                    item: section.into(),
+                                    status: ItemStatus::Failed(d),
+                                }]
+                            }
+                            Ok(CheckResult::ManagedByUser) => {
+                                vec![ProvisionResult {
+                                    item: format!("{section} (user-managed)"),
+                                    status: ItemStatus::Satisfied,
+                                }]
+                            }
                             Err(e) => vec![ProvisionResult {
                                 item: section.into(),
                                 status: ItemStatus::Failed(e.to_string()),
@@ -1281,7 +1333,7 @@ mod tests {
         let setmeup_dir = home.join(".config/setmeup");
         fs::create_dir_all(&setmeup_dir).unwrap();
         let aliases_path = setmeup_dir.join("shell-aliases.sh");
-        fs::write(&aliases_path, "# managed by setmeup\nalias ll=\"ls -la\"\n").unwrap();
+        fs::write(&aliases_path, "# managed by setmeup\nalias ll='ls -la'\n").unwrap();
 
         let ctx = ProvisionContext {
             repo_root: dir.path().to_path_buf(),
@@ -1499,8 +1551,113 @@ mod tests {
         provision_shell(&manifest, &ctx).unwrap();
 
         let rc_content = fs::read_to_string(&rc).unwrap();
-        assert!(rc_content.contains("export EDITOR=nvim"));
-        assert_eq!(rc_content.matches("export EDITOR=nvim").count(), 1);
+        assert!(rc_content.contains(r#"export EDITOR="nvim""#));
+        assert_eq!(rc_content.matches(r#"export EDITOR="nvim""#).count(), 1);
+    }
+
+    #[test]
+    fn shell_different_content_reports_divergent_and_does_not_overwrite() {
+        // Pre-existing shell-functions.sh with DIFFERENT content from declared
+        // and no setmeup marker → check_shell returns Divergent, provision
+        // does NOT overwrite the file.
+        let manifest = Manifest {
+            shell: ShellConfig {
+                functions: vec![ShellFunction {
+                    name: "myfunc".into(),
+                    body: "echo hello".into(),
+                }],
+                ..ShellConfig::default()
+            },
+            ..Manifest::default()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        let setmeup_dir = home.join(".config/setmeup");
+        fs::create_dir_all(&setmeup_dir).unwrap();
+        let func_path = ShellHandler::functions_path(&home);
+        // Write a different functions file (different name, no marker).
+        fs::write(&func_path, "otherfunc() {\n  echo different\n}\n").unwrap();
+        let rc = rc_file_path(&home);
+        fs::write(&rc, "").unwrap();
+
+        let ctx = ProvisionContext {
+            repo_root: dir.path().to_path_buf(),
+            home: home.clone(),
+            dry_run: false,
+        };
+
+        // check_shell should detect the divergence
+        let check = check_shell(&manifest, &ctx).unwrap();
+        assert!(
+            matches!(check, CheckResult::Divergent(_)),
+            "expected Divergent, got {check:?}"
+        );
+
+        // File content should still be the original (not overwritten)
+        let after = fs::read_to_string(&func_path).unwrap();
+        assert!(after.contains("otherfunc"), "original content preserved");
+        assert!(!after.contains("myfunc"), "declared function not written");
+    }
+
+    #[test]
+    fn shell_matching_content_reports_satisfied_without_write() {
+        // Pre-existing shell-functions.sh with MATCHING content from declared
+        // (no marker, but same function names) → check_shell returns Satisfied
+        // (or NeedsProvision if rc source line is missing — ensure we handle both).
+        //
+        // This test: file exists with matching function names AND rc source line
+        // already present → Satisfied, no overwrite.
+        let manifest = Manifest {
+            shell: ShellConfig {
+                functions: vec![ShellFunction {
+                    name: "myfunc".into(),
+                    body: "echo hello".into(),
+                }],
+                ..ShellConfig::default()
+            },
+            ..Manifest::default()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        let setmeup_dir = home.join(".config/setmeup");
+        fs::create_dir_all(&setmeup_dir).unwrap();
+        let func_path = ShellHandler::functions_path(&home);
+        // Write a matching functions file (same name, same body)
+        fs::write(
+            &func_path,
+            "# managed by setmeup\n\nmyfunc() {\necho hello\n}\n\n",
+        )
+        .unwrap();
+        let rc = rc_file_path(&home);
+        // Pre-add the source line in rc
+        let source_line = format!(
+            ". \"$HOME/{}\"",
+            func_path
+                .strip_prefix(&home)
+                .unwrap_or(&func_path)
+                .display()
+        );
+        fs::write(&rc, format!("{source_line}\n")).unwrap();
+
+        let ctx = ProvisionContext {
+            repo_root: dir.path().to_path_buf(),
+            home: home.clone(),
+            dry_run: false,
+        };
+
+        // check_shell should be satisfied (file exists + matches + rc source line)
+        let check = check_shell(&manifest, &ctx).unwrap();
+        assert_eq!(
+            check,
+            CheckResult::Satisfied,
+            "expected Satisfied for matching content + rc source"
+        );
+
+        // File should not have been modified
+        let after = fs::read_to_string(&func_path).unwrap();
+        assert!(after.contains("myfunc"));
     }
 
     // -----------------------------------------------------------------------
