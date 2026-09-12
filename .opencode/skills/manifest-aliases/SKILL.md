@@ -9,7 +9,7 @@ metadata:
 
 # Overview
 
-The `aliases` section declares shell aliases for interactive use. Aliases are written to `~/.config/setmeup/shell-aliases.sh` — a managed file that is sourced from the user's `.bashrc` (or equivalent) via a single sourcing line. This keeps alias definitions separate from the user's rc file, making them easy to manage, regenerate, and remove without touching the user's personal rc customizations.
+The `aliases` section declares shell aliases for interactive use. It is a map from alias name to command. Aliases are written to `~/.config/setmeup/shell-aliases.sh` — a managed file that is sourced from the user's `.bashrc` (or equivalent) via a single sourcing line. This keeps alias definitions separate from the user's rc file, making them easy to manage, regenerate, and remove without touching the user's personal rc customizations.
 
 ---
 
@@ -55,24 +55,25 @@ The `aliases` section declares shell aliases for interactive use. Aliases are wr
 ## Block structure
 
 ```yaml
-aliases:
-  - name: <alias-name>      # required, unique
-    value: <alias-command>   # required, shell command string
+aliases:                        # map name -> command string
+  <alias-name>: <command>       # alias expands to <command>
 ```
 
 ## Required vs optional fields
 
 | Field   | Required | Description |
 |---------|----------|-------------|
-| `name`  | ✅       | Alias name (the word typed at the shell prompt). Must be a valid shell identifier. |
-| `value` | ✅       | The command string the alias expands to. Use single-quote-safe syntax. |
+| (key)   | ✅       | Alias name (the word typed at the shell prompt). Must be a valid shell identifier. |
+| (value) | ✅       | The command string the alias expands to. |
+
+The map key is the alias name; the map value is the command. There is no `name`/`value` object form — YAML `aliases: { gs: "git status" }` is the schema. When setmeup emits the aliases file, each value is **single-quoted** with escaping (`alias <name>='<escaped-command>'`).
 
 ## Validation rules
 
-1. `name` must be non-empty, unique, and a valid shell identifier (`^[a-zA-Z_][a-zA-Z0-9_-]*$`).
-2. `name` must not shadow an existing shell builtin (`cd`, `ls`, `echo`, `exit`, etc.) unless the manifest explicitly intends to override it — a warning is raised but not a hard error.
-3. `value` must be non-empty.
-4. `value` must not contain newlines (multi-line aliases are not supported; use `manifest-shell` functions instead).
+1. The alias name (key) must be non-empty and a valid shell identifier (`^[a-zA-Z_][a-zA-Z0-9_-]*$`).
+2. The alias name must not shadow an existing shell builtin (`cd`, `ls`, `echo`, `exit`, etc.) unless the manifest explicitly intends to override it — a warning is raised but not a hard error.
+3. The command value must be non-empty.
+4. The command value must not contain newlines (multi-line aliases are not supported; use `manifest-shell` functions instead).
 5. Circular references (alias A pointing to alias B pointing to alias A) are not detectable statically; the shell will detect them at runtime.
 6. Aliases can reference paths from declared repos (e.g., `my-deploy` → `~/repos/my-project/deploy.sh`). Dependencies on `repos` are implicit — provisioning order satisfies this.
 
@@ -80,18 +81,11 @@ aliases:
 
 ```yaml
 aliases:
-  - name: gs
-    value: git status
-  - name: gc
-    value: git commit
-  - name: gp
-    value: git push
-  - name: reload
-    value: source ~/.bashrc
-  - name: ll
-    value: ls -la --color=auto
-  - name: tmux-session
-    value: tmux new-session -A -s main
+  gs: "git status"
+  gc: "git commit"
+  gp: "git push"
+  hh: "cd ~/repos/hoodhunter"
+  ll: "ls -la --color=auto"
 ```
 
 ---
@@ -189,8 +183,8 @@ If ALL three are satisfied, the `aliases` block reports `Satisfied` and no file 
 
 | Field   | Type | Widget |
 |---------|------|--------|
-| `name`  | free text | Text input for alias name |
-| `value` | free text | Text input for alias command; multi-line not supported |
+| `(key)`   | free text | Text input for alias name (map key) |
+| `(value)` | free text | Text input for alias command (map value); multi-line not supported |
 
 ## Default values
 
@@ -198,8 +192,8 @@ No default values for aliases — the wizard starts with an empty list. Common p
 
 ## Validation rules (wizard-specific)
 
-- `name` must match `^[a-zA-Z_][a-zA-Z0-9_-]*$` and be unique in the current session.
-- `name` with a leading `sudo` prefix is rejected (alias 'sudo-apt' is invalid; 'sapt' is acceptable).
-- `value` must be non-empty and not exceed 500 characters (prevent pathological alias definitions).
-- If `value` contains a single quote, the wizard automatically escapes it using the `'\''` sequence.
-- A warning is shown (but not a hard error) if `name` shadows a shell builtin or a command on `$PATH`.
+- `(key)` must match `^[a-zA-Z_][a-zA-Z0-9_-]*$` and be unique in the current session.
+- `(key)` with a leading `sudo` prefix is rejected (alias 'sudo-apt' is invalid; 'sapt' is acceptable).
+- `(value)` must be non-empty and not exceed 500 characters (prevent pathological alias definitions).
+- If `(value)` contains a single quote, the wizard automatically escapes it using the `'\''` sequence.
+- A warning is shown (but not a hard error) if `(key)` shadows a shell builtin or a command on `$PATH`.

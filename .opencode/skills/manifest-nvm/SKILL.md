@@ -11,6 +11,8 @@ metadata:
 
 The `nvm` section installs the Node Version Manager via a verified git clone and configures a default Node.js version and global npm packages. This is distinct from `packages` because nvm is installed by cloning a git repository (never via package manager), and its state is managed through `~/.nvm/` rather than `dpkg`/`brew`.
 
+**Implementation status:** the `nvm` handler is declared but `provision()` is not yet implemented — it surfaces a visible "not yet implemented" failure.
+
 ---
 
 # Research
@@ -50,36 +52,33 @@ The `nvm` section installs the Node Version Manager via a verified git clone and
 
 ```yaml
 nvm:
-  version: <git-tag-or-branch>  # required, e.g. "v0.40.1"
-  node: <node-version>          # required, e.g. "22" or "lts/*"
-  packages:                     # optional list of global npm packages
-    - <package-name>[@<version>]
+  node-version: lts/*         # optional, string, default "lts/*"
+  global-packages: [pnpm]     # optional, list of strings, default []
 ```
+
+All fields are optional. An absent `nvm` section means "do not manage nvm"; a present `nvm: {}` means "install nvm with defaults" (latest tag, lts/* node, no global packages).
 
 ## Required vs optional fields
 
-| Field      | Required | Description |
-|------------|----------|-------------|
-| `version`  | ✅       | nvm git tag to checkout (e.g. `v0.40.1`). Set to `latest` to resolve from GitHub tags. |
-| `node`     | ✅       | Node.js version to install and set as default. Accepts: `lts/*`, `lts/iron`, `22`, `20`, `18`, etc. |
-| `packages` |          | List of global npm packages to install after Node is set. Each entry is a package name, optionally with `@<version>`. |
+| Field              | Required | Description |
+|--------------------|----------|-------------|
+| `node-version`     |          | Node.js version to install and set as default. Accepts: `lts/*`, `lts/iron`, `22`, `20`, `18`, etc. Default: `lts/*`. |
+| `global-packages`  |          | List of global npm packages to install after Node is set. Each entry is a package name, optionally with `@<version>`. Default: `[]`. |
 
 ## Validation rules
 
-1. `version` must be non-empty. If not `latest`, it must match a valid git ref (tag or branch) from `nvm-sh/nvm`.
-2. `node` must be non-empty and match a valid Node.js version specifier that `nvm install` accepts.
-3. `packages` entries must be non-empty; version constraints must follow npm semver syntax (`@^1.2.3`, `@1.x`, etc.) or be absent.
+1. `node-version` must be non-empty when present (default `lts/*` is always valid).
+2. `node-version` must match a valid Node.js version specifier that `nvm install` accepts.
+3. `global-packages` entries must be non-empty.
 
 ## Example YAML
 
 ```yaml
 nvm:
-  version: v0.40.1
-  node: "22"
-  packages:
+  node-version: "22"
+  global-packages:
     - prettier
     - typescript@5.6
-    - eslint
 ```
 
 ---
@@ -174,21 +173,17 @@ If ALL four are satisfied, the entire `nvm` block reports `Satisfied` and no ope
 
 ## Input type
 
-| Field      | Type | Widget |
-|------------|------|--------|
-| `version`  | free text | Text input; suggest latest from GitHub tags |
-| `node`     | list toggle | Pre-populated: `lts/*`, `22`, `20`, `18`, `16`; option to type custom |
-| `packages` | multi free text | Add/remove list of npm package names |
+| Field              | Type | Widget |
+|--------------------|------|--------|
+| `node-version`     | list toggle | Pre-populated: `lts/*`, `22`, `20`, `18`, `16`; option to type custom |
+| `global-packages`  | multi free text | Add/remove list of npm package names |
 
 ## Default values
 
-- `version`: latest stable nvm tag (resolved from GitHub at wizard time).
-- `node`: `lts/*` (current LTS).
-- `packages`: empty (no global packages by default).
+- `node-version`: `lts/*` (current LTS).
+- `global-packages`: empty.
 
 ## Validation rules (wizard-specific)
 
-- `version` must match `^v?\d+\.\d+\.\d+$` or be `latest` (resolved at apply time).
-- `node` must be a valid Node.js version: `lts/*`, `lts/<name>`, or a semver-like string (e.g. `22`, `22.11.0`).
-- `packages` entries must be non-empty and cannot duplicate.
-- Node version must be installable by the nvm version selected (very old nvm + very new Node may be incompatible).
+- `node-version` must be a valid Node.js version: `lts/*`, `lts/<name>`, or a semver-like string (e.g. `22`, `22.11.0`).
+- `global-packages` entries must be non-empty and cannot duplicate.

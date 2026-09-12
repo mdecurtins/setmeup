@@ -9,7 +9,9 @@ metadata:
 
 # Overview
 
-The `packages` section declares OS-native packages to install. Each entry specifies a canonical name and optional per-OS overrides. The provisioning backend resolves the correct package manager command at apply time.
+The `packages` section declares OS-native packages to install. It is a map from package name to config. Each key is the canonical cross-OS identifier; the config object provides optional `from` (backend selector), `depends` (within-section ordering), and per-OS package-name overrides. The provisioning backend resolves the correct package manager command at apply time.
+
+**Implementation status:** the `packages` handler is declared but `provision()` is not yet implemented — it surfaces a visible "not yet implemented" failure.
 
 ---
 
@@ -55,72 +57,48 @@ The `packages` section declares OS-native packages to install. Each entry specif
 ## Block structure
 
 ```yaml
-packages:
-  - name: <canonical-name>           # required, unique
-    apt: <apt-package-name>          # optional, overrides name on Ubuntu
-    brew: <brew-formula-name>        # optional, overrides name on macOS
-    winget: <winget-package-id>      # optional, overrides name on Windows
-    pip: <pypi-package-name>         # optional, installs via pip3
-    from: <source-type>              # optional, "download" for verified download
-    url: <download-url>              # required if from: download
-    checksum: <sha256-hex>           # required if from: download
-    depends: [<other-package-name>]  # optional, ordering constraint within section
+packages:                              # map name -> config
+  <name>:                              # canonical cross-OS identifier (key)
+    from: <backend>                    # optional: apt | brew | winget | pip | download
+    depends: [<other-package-name>]    # optional, within-section ordering only
+    apt: <apt-package-name>            # optional, overrides key on Ubuntu
+    brew: <brew-formula-name>          # optional, overrides key on macOS
+    winget: <winget-package-id>        # optional, overrides key on Windows
 ```
+
+The map key (`<name>`) IS the package name. Per-OS overrides are only needed when the package name differs across platforms (e.g. `docker.io` on Ubuntu vs `docker` on macOS).
 
 ## Required vs optional fields
 
 | Field      | Required | Description |
 |------------|----------|-------------|
-| `name`     | ✅       | Canonical cross-OS identifier; used as fallback package name |
-| `apt`      |          | Override package name on Ubuntu/Debian |
-| `brew`     |          | Override formula name on macOS |
-| `winget`   |          | Override package ID on Windows (e.g. `Git.Git`) |
-| `pip`      |          | PyPI package name; adds pip as implicit dependency |
-| `from`     |          | Source type: currently only `download` is defined |
-| `url`      | ⚠️      | Required when `from: download` — direct download URL |
-| `checksum` | ⚠️      | Required when `from: download` — SHA-256 hex digest |
-| `depends`  |          | List of other package names that must install first |
+| `from`     |          | Backend selector: `apt`, `brew`, `winget`, `pip`, `download`. `None` = per-OS default (apt on Ubuntu, brew on macOS, winget on Windows). |
+| `depends`  |          | List of other package **keys** that must install first (within-section ordering only). |
+| `apt`      |          | Override package name on Ubuntu/Debian when it differs from the key. |
+| `brew`     |          | Override formula name on macOS when it differs from the key. |
+| `winget`   |          | Override package ID on Windows when it differs from the key (e.g. `Git.Git`). |
 
 ## Validation rules
 
-1. `name` must be non-empty and unique across the `packages` list.
-2. At least one backend must be resolvable: either a per-OS override OR `name` is a valid package name for at least one OS.
-3. `from: download` requires both `url` and `checksum`; rejects any per-OS package overrides (mutually exclusive with apt/brew/winget/pip).
-4. `depends` must reference names that also appear in `packages` (self-references rejected).
-5. `checksum` must be a valid 64-character hex string (`^[0-9a-f]{64}$`).
-6. `depends` ordering constraint: there must be no cycles in the dependency graph. If A depends on B and B depends on C, the provisioning order is C, B, A.
+1. The map key (package name) must be non-empty.
+2. `from` when present must be one of: `apt`, `brew`, `winget`, `pip`, `download`.
+3. `depends` must reference keys that also appear in the `packages` map (self-references rejected).
+4. `depends` ordering constraint: there must be no cycles in the dependency graph. If A depends on B and B depends on C, the provisioning order is C, B, A.
+5. `from: download` means the package is a verified download (git clone or checksum-pinned binary) — see Trust boundary section below. No `url` or `checksum` fields exist in the manifest schema; the download URL and verification method are encoded in the handler, not the manifest.
 
 ## Example YAML
 
 ```yaml
 packages:
-  - name: git
-    apt: git
-    brew: git
-    winget: Git.Git
-
-  - name: neovim
-    apt: neovim
-    brew: neovim
-
-  - name: docker
+  git: {}                       # empty = per-OS default from
+  yt-dlp:
+    from: pip
+    depends: [ffmpeg]
+  docker:
     apt: docker.io
     brew: docker
-
-  - name: gh
-    apt: gh
-    brew: gh
-    winget: GitHub.cli
-
-  - name: ruff
-    pip: ruff
-
-  - name: starship
+  starship:
     from: download
-    url: https://github.com/starship/starship/releases/latest/download/starship-x86_64-unknown-linux-gnu.tar.gz
-    checksum: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b
-    depends: [git, curl]
-```
 
 ---
 
@@ -130,22 +108,23 @@ packages:
 
 ```rust
 // OS-native backends
-fn install_package(os: Os, package_name: &str) -> Result<ItemStatus> {
-    match os {
-        Os::Ubuntu => sudo apt-get install -y <package_name>,
-        Os::Macos  => brew install <package_name>,
-        Os::Windows => winget install --id <package_name> --accept-package-agreements --accept-source-agreements,
+fn install_package(package_name: &str, from: Option<&str>) -> Result<ItemStatus> {
+    let backend = from.unwrap_or_else(|| default_backend_for_os(os));
+    match backend {
+        "apt" => sudo apt-get install -y <package_name>,
+        "brew" => brew install <package_name>,
+        "winget" => winget install --id <package_name> ...,
+        "pip" => pip3 install <package_name>,
+        "download" => verified_download(package_name), // see trust boundary
     }
 }
 
-// pip (cross-platform)
-pip3 install <pypi-package-name>
-
-// download (verified, cross-platform)
-fn install_download(url: &str, checksum: &str, dest_dir: &Path) -> Result<ItemStatus> {
-    let archive = download(url)?;       // fetch to temp
-    verify_sha256(&archive, checksum)?; // must match
-    extract_to(archive, dest_dir)?;     // tar/gzipped or unzip
+// download (verified, handler-encoded)
+fn verified_download(package_name: &str) -> Result<ItemStatus> {
+    let (url, checksum) = lookup_download_info(package_name)?; // encoded in handler
+    let archive = download(url)?;        // fetch to temp
+    verify_sha256(&archive, checksum)?;  // must match
+    extract_to(archive, dest_dir)?;      // tar/gzipped or unzip
     Ok(ItemStatus::Satisfied)
 }
 ```
@@ -209,37 +188,33 @@ Presence-check per backend (see Verification command above) — each tool is che
 
 | Field      | Type |
 |------------|------|
-| `name`     | free text (required) |
-| `apt`      | free text (auto-filled from `name`) |
-| `brew`     | free text (auto-filled from `name`) |
-| `winget`   | free text (auto-filled from `name`) |
-| `pip`      | free text |
-| `from`     | list toggle: `""` | `"download"` |
-| `url`      | free text (shown only if `from: download`) |
-| `checksum` | free text (shown only if `from: download`) |
-| `depends`  | multi-select from already-listed package names |
+| (key)      | free text (required, canonical name) |
+| `from`     | list toggle: `""` | `"apt"` | `"brew"` | `"winget"` | `"pip"` | `"download"` |
+| `apt`      | free text (auto-filled from key) |
+| `brew`     | free text (auto-filled from key) |
+| `winget`   | free text (auto-filled from key) |
+| `depends`  | multi-select from already-listed package keys |
 
 ## Default values
 
-- `apt`, `brew`, `winget` default to `name` unless explicitly overridden.
-- `from` defaults to empty (OS-native package manager).
+- `from` defaults to empty (per-OS default backend).
+- `apt`, `brew`, `winget` default to the map key (package name) unless explicitly overridden.
 - `depends` defaults to empty list.
 
 ## Validation rules (wizard-specific)
 
-- `name` must be non-empty and not already used in the current session.
-- URL must parse as a valid HTTPS URL when `from: download`.
-- Checksum must be exactly 64 hex characters when `from: download`.
+- The map key must be non-empty and not already used in the current session.
+- `from` when set must be one of the recognized backends.
 - `depends` selections cannot include the package itself.
 
 ---
 
 # Trust boundary
 
-**`from: download` means verified download only.** The implementation MUST:
+**`from: download` means verified download only.** The manifest does not carry download URLs or checksums — those are encoded in the handler. The implementation MUST:
 
-1. Fetch the URL via a secure transport (HTTPS, never HTTP).
-2. Verify the SHA-256 checksum before extracting or executing.
-3. Fail closed: if checksum does not match, remove the downloaded file and report `ItemStatus::Failed`.
+1. Fetch via secure transport (HTTPS, never HTTP).
+2. Verify integrity (SHA-256 checksum or git tag verification) before extracting or executing.
+3. Fail closed: if integrity check fails, remove the downloaded file and report `ItemStatus::Failed`.
 
 No `from: download` entry may ever execute a `curl <url> | sh` pattern. Git clone for release tarballs is acceptable when the URL points to an official GitHub release asset. For git clone from arbitrary repos, see `manifest-repos` skill.

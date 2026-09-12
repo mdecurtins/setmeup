@@ -29,8 +29,12 @@ The `configure` command SHALL launch a 6-step linear wizard. Each step fills the
 - **THEN** the next step is rendered full-screen
 
 #### Scenario: Wizard navigates backward
-- **WHEN** a user presses Escape or selects "Back"
+- **WHEN** a user presses Backspace or B
 - **THEN** the previous step is rendered with its prior state preserved
+
+#### Scenario: Wizard quits on Escape
+- **WHEN** a user presses Escape or q
+- **THEN** the wizard exits without writing a manifest
 
 ### Requirement: Wizard steps
 The wizard SHALL have these steps in order:

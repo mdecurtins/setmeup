@@ -9,7 +9,9 @@ metadata:
 
 # Overview
 
-The `rustup` section installs the Rust toolchain manager via a verified `rustup-init` download and configures the default toolchain, targets, and components. This is distinct from `packages` because rustup is installed via an official installer binary (verified by checksum and GPG), not via the OS package manager. Package-manager versions of Rust (`apt install rustc`) are never used — they lag behind and conflict with rustup-managed installs.
+The `rustup` section installs the Rust toolchain manager via a verified `rustup-init` download and configures the default toolchain. This is distinct from `packages` because rustup is installed via an official installer binary (verified by checksum and GPG), not via the OS package manager. Package-manager versions of Rust (`apt install rustc`) are never used — they lag behind and conflict with rustup-managed installs.
+
+**Implementation status:** the `rustup` handler has a real `check()` but `provision()` is a stub in this change. Only `toolchain` is declared in the schema; `profile`, `targets`, and `components` are NOT part of the implemented schema.
 
 ---
 
@@ -63,43 +65,28 @@ The "curl | sh" pattern on the rustup.rs landing page is the most common install
 
 ```yaml
 rustup:
-  toolchain: <channel>        # required, e.g. "stable", "nightly", "1.78.0"
-  profile: <profile>          # optional, minimal / default / complete
-  targets:                    # optional list of cross-compilation targets
-    - <target-triple>
-  components:                 # optional list of additional components
-    - <component-name>
+  toolchain: stable         # optional, string, default "stable"
 ```
+
+All fields are optional. An absent `rustup` section means "do not manage rustup"; a present `rustup: {}` means "install rustup with defaults" (stable toolchain).
 
 ## Required vs optional fields
 
 | Field       | Required | Description |
 |-------------|----------|-------------|
-| `toolchain` | ✅       | Rust channel or version string. Accepts: `stable`, `nightly`, `beta`, `1.82.0`, `nightly-2024-01-01`. |
-| `profile`   |          | Component selection profile: `minimal` (only rustc/cargo/std), `default` (adds rustdoc, clippy, etc.), `complete` (all components). Defaults to `default`. |
-| `targets`   |          | Additional cross-compilation targets to install (e.g. `wasm32-unknown-unknown`, `aarch64-unknown-linux-gnu`). |
-| `components`|          | Additional components not covered by the profile (e.g. `rust-analyzer`, `rust-src`, `miri`, `llvm-tools`). |
+| `toolchain` |          | Rust channel or version string. Accepts: `stable`, `nightly`, `beta`, `1.82.0`, `nightly-2024-01-01`. Default: `stable`. |
 
 ## Validation rules
 
-1. `toolchain` must be non-empty and one of: a channel keyword (`stable`, `beta`, `nightly`), an exact version (`1.82.0`), or a dated nightly (`nightly-YYYY-MM-DD`).
-2. `profile` must be one of: `minimal`, `default`, `complete`.
-3. `targets` entries must be valid Rust target triples (e.g. `x86_64-unknown-linux-gnu`, `wasm32-unknown-unknown`). No validation beyond non-empty is done statically; invalid targets are caught by `rustup target add`.
-4. `components` entries must be valid component names recognized by rustup (e.g. `clippy`, `rustfmt`). Invalid components are caught at provisioning time.
-5. The special component `rust-analyzer` has a known name mismatch: the target directory is `rust-analyzer` but the component name is `rust-analyzer-preview` on some older toolchains. Check the installed toolchain's component list if `rust-analyzer` fails.
+1. `toolchain` must be non-empty when present. It is passed through to `rustup` — no static channel validation is done; invalid channels are caught at provisioning time by rustup itself.
+
+> Note: `profile`, `targets`, and `components` are NOT part of the implemented schema. Do not add them to the Rust struct without an OpenSpec change; the current `RustupConfig` has only `toolchain`.
 
 ## Example YAML
 
 ```yaml
 rustup:
   toolchain: stable
-  profile: default
-  targets:
-    - wasm32-unknown-unknown
-    - aarch64-unknown-linux-gnu
-  components:
-    - rust-analyzer
-    - rust-src
 ```
 
 ---
@@ -121,22 +108,16 @@ sha256sum -c "$(basename ${RUSTUP_URL}).sha256"  # fails if checksum mismatch
 
 # 3. Run the verified binary
 chmod +x rustup-init
-./rustup-init -y --no-modify-path \
-  --default-toolchain <toolchain> \
-  --profile <profile>
+./rustup-init -y --no-modify-path --default-toolchain <toolchain>
 
-# 4. Add targets
-rustup target add <target1> <target2>
-
-# 5. Add components
-rustup component add <component1> <component2>
-
-# 6. Set default toolchain (redundant if --default-toolchain worked, but idempotent)
+# 4. Set default toolchain (redundant if --default-toolchain worked, but idempotent)
 rustup default <toolchain>
 
-# 7. Clean up
+# 5. Clean up
 rm rustup-init rustup-init.sha256
 ```
+
+The current `provision()` is a stub — this template is the target behavior.
 
 ## Config file location and format
 
@@ -154,12 +135,6 @@ rustup --version
 # toolchain installed and default set
 rustup show | grep <toolchain>
 
-# targets installed
-rustup target list --installed | grep <target>
-
-# components installed
-rustup component list --installed | grep <component>
-
 # cargo on PATH (via source)
 source ~/.cargo/env && cargo --version
 ```
@@ -167,8 +142,8 @@ source ~/.cargo/env && cargo --version
 ## Dependencies on other capabilities
 
 - **Required before rustup provisions:** `packages` must include `curl` (for the verified download).
-- **Required after rustup provisions:** `shell` section must include `. ~/.cargo/env` sourcing so `rustc`, `cargo`, etc. are available in interactive shells.
-- **Ordering:** `packages` (curl) → `rustup` → `shell` (cargo env sourcing).
+- **Required after rustup provisions:** `shell` section must include the rustup/cargo PATH lines (see `manifest-shell` skill) so `rustc`, `cargo`, etc. are available in interactive shells.
+- **Ordering:** `packages` (curl) → `rustup` → `shell` (cargo PATH).
 
 ---
 
@@ -178,25 +153,19 @@ source ~/.cargo/env && cargo --version
 
 1. **rustup installed:** `rustup --version` exits with code 0.
 2. **Toolchain matches:** `rustup default` output matches the declared toolchain channel/version.
-3. **Profile matches:** (indirect) if the toolchain is the same profile and the expected components are present, the profile is considered satisfied. Direct profile detection requires `rustup show` parsing.
-4. **Targets present:** `rustup target list --installed` contains each declared target.
-5. **Components present:** `rustup component list --installed` contains each declared component.
 
-If ALL five are satisfied, the entire `rustup` block reports `Satisfied` and no operations run.
+If BOTH are satisfied, the `rustup` block reports `Satisfied` and no operations run.
 
 ## What constitutes "divergent" state
 
 - **rustup missing:** `rustup` command not found. → Run the verified download and binary install.
 - **Toolchain mismatch:** `rustup default` shows a different toolchain. → Run `rustup default <declared>` to switch (does NOT remove the old toolchain).
 - **Toolchain not installed:** the declared toolchain is not in `rustup show`. → Run `rustup toolchain install <declared>` then `rustup default <declared>`.
-- **Missing targets:** at least one declared target is not installed. → Run `rustup target add <target>` for each missing target.
-- **Missing components:** at least one declared component not installed for the default toolchain. → Run `rustup component add <component>` for each missing component.
 - **Download checksum mismatch:** the rustup-init binary fails the SHA-256 check. → Remove downloaded file, report `ItemStatus::Failed`, do NOT run the binary.
 
 ## What state is "user-managed" (no setmeup marker)
 
 - Additional toolchains installed by the user (beyond the declared default) are left untouched.
-- Additional targets and components installed by the user are left untouched.
 - Non-default overrides (`rustup override set`) in specific directories are left untouched.
 - `~/.cargo/config.toml` is not managed.
 - `~/.rustup/settings.toml` is not managed.
@@ -210,20 +179,11 @@ If ALL five are satisfied, the entire `rustup` block reports `Satisfied` and no 
 | Field        | Type | Widget |
 |--------------|------|--------|
 | `toolchain`  | list toggle | Options: `stable`, `beta`, `nightly`; option to type a specific version |
-| `profile`    | list toggle | Options: `minimal`, `default`, `complete` |
-| `targets`    | multi free text | Add known targets via toggle list + free text for custom triples |
-| `components` | multi-select | Checkboxes: `rust-analyzer`, `rust-src`, `clippy`, `rustfmt`, `miri`, `llvm-tools`, `rust-docs`; option to type custom |
 
 ## Default values
 
 - `toolchain`: `stable`
-- `profile`: `default`
-- `targets`: empty
-- `components`: empty
 
 ## Validation rules (wizard-specific)
 
 - `toolchain` must match one of: `^stable$`, `^beta$`, `^nightly$`, `^\d+\.\d+\.\d+$`, or `^nightly-\d{4}-\d{2}-\d{2}$`.
-- `profile` must be one of the three recognized values.
-- `targets` entries must look like valid triples (at least two hyphens: `arch-vendor-os`).
-- Duplicate targets or components are filtered.

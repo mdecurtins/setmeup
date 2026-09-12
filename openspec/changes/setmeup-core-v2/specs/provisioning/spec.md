@@ -81,12 +81,13 @@ The fixed provisioning order SHALL be:
 ```
 1. packages      (system packages and tool installations)
 2. nvm           (node version manager)
-3. repos         (git repository cloning)
-4. aliases       (shell aliases, may reference repo paths)
-5. configs       (per-tool configuration files)
-6. shell         (functions, prompt, PATH, env, sources)
-7. identity      (SSH/GPG — existing, unchanged ordering)
-8. secrets       (credential backend — existing, unchanged ordering)
+3. rustup        (rust toolchain)
+4. repos         (git repository cloning)
+5. aliases       (shell aliases, may reference repo paths)
+6. configs       (per-tool configuration files)
+7. shell         (functions, prompt, PATH, env, sources)
+8. identity      (SSH/GPG — existing, unchanged ordering)
+9. secrets       (credential backend — existing, unchanged ordering)
 ```
 
 #### Scenario: Dotfiles applied during shell step

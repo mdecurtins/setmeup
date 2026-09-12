@@ -82,7 +82,7 @@ In `src/manifest.rs`:
 
 ### 5. Implement the handler
 
-Create `src/provisioning/<name>.rs`:
+Add the handler inline in `src/provisioning.rs` (the provisioning engine is currently a single module; splitting handlers into `src/provisioning/<name>.rs` modules is a future option):
 
 ```rust
 use crate::error::Result;
@@ -90,9 +90,7 @@ use crate::manifest::Os;
 use super::{CheckResult, ProvisionContext, ProvisionHandler, ProvisionResult};
 
 #[derive(Debug)]
-pub struct NameHandler {
-    config: NameConfig,
-}
+pub struct NameHandler;
 
 impl ProvisionHandler for NameHandler {
     fn section_name(&self) -> &'static str { "<name>" }
@@ -112,9 +110,8 @@ impl ProvisionHandler for NameHandler {
 
 In `src/provisioning.rs`:
 
-1. Add the handler module: `pub mod <name>;`
-2. Add a variant in `capability_handlers()` when the manifest section is present
-3. Slot it into the correct position in the provisioning order
+1. Add a variant in `capability_handlers()` when the manifest section is present
+2. Slot it into the correct position in the provisioning order (fixed order: packages → nvm → rustup → repos → aliases → configs → shell → identity → secrets)
 
 ### 7. Add the wizard step
 
@@ -149,8 +146,8 @@ openspec validate
 - [ ] Issue created (or task references existing issue)
 - [ ] Skill written (`.opencode/skills/manifest-<name>/SKILL.md`)
 - [ ] Schema defined (`manifest.rs`: struct + field + validation + tests)
-- [ ] Handler implemented (`provisioning/<name>.rs`: check + provision + tests)
-- [ ] Handler wired into dispatch (`provisioning.rs`: module + capability_handlers)
+- [ ] Handler implemented (`provisioning.rs`: check + provision + tests)
+- [ ] Handler wired into dispatch (`provisioning.rs`: capability_handlers)
 - [ ] Wizard step updated (`tui/steps.rs`)
 - [ ] Spec updated (`openspec/specs/<name>/spec.md`)
 - [ ] Done-gate green (fmt, clippy, test, validate)

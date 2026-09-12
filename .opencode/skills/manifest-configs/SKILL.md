@@ -1,6 +1,6 @@
 ---
 name: manifest-configs
-description: Document and implement the `configs` section of the setmeup manifest — declarative tool/dotfile configuration files with three idempotent strategies: create-only, overwrite-managed, and merge.
+description: Document and implement the `configs` section of the setmeup manifest — declarative tool configuration files with the implemented merge strategies (create-only, overwrite-managed, merge-declared).
 license: MIT
 metadata:
   author: setmeup
@@ -9,9 +9,7 @@ metadata:
 
 # Overview
 
-The `configs` section manages tool configuration files (dotfiles beyond the simple source→dest symlink pattern in `dotfiles`). It supports three strategies for applying config content to a target path, chosen based on the file format and how aggressively setmeup should manage the content.
-
-This is more capable than the simple `dotfiles` symlink section because it supports strategy choice, idempotency based on content matching, and a marker-comment system for distinguishing setmeup-managed content from user additions.
+The `configs` section manages tool configuration files. It supports strategy-based application of declared content to a target path: `create-only` (never touch an existing file), `overwrite-managed` (regenerate files bearing a setmeup marker comment), and `merge` (declared enum variant; not yet implemented). Content matching drives idempotency; a marker-comment system distinguishes setmeup-managed content from user additions.
 
 ---
 
@@ -23,41 +21,34 @@ A reference for common tool config files. Not exhaustive — agents should confi
 
 | Tool      | Config path | Format | Strategy |
 |-----------|------------|--------|----------|
-| git       | `~/.gitconfig` | INI-like | overwrite-managed (with `# setmeup` markers) |
+| git       | `~/.gitconfig` | INI-like | overwrite-managed (with marker comment) |
 | ripgrep   | `~/.ripgreprc` | line-per-flag | overwrite-managed |
-| fd        | `~/.config/fd/fdignore` | gitignore-like | overwrite-managed |
-| bat       | `~/.config/bat/config` | line-per-flag | overwrite-managed |
-| alacritty | `~/.config/alacritty/alacritty.toml` | TOML | create-only (not safe to overwrite-managed) |
-| starship  | `~/.config/starship.toml` | TOML | create-only |
+| yt-dlp    | `~/.config/yt-dlp/config` | line-per-flag | create-only |
+| alacritty | `~/.config/alacritty/alacritty.toml` | TOML | create-only |
 | nvim      | `~/.config/nvim/init.lua` | Lua | create-only or overwrite-managed |
-| tmux      | `~/.tmux.conf` | line-per-option | overwrite-managed (with `# setmeup` markers) |
+| tmux      | `~/.tmux.conf` | line-per-option | overwrite-managed |
 | ssh       | `~/.ssh/config` | INI-like | create-only (ownership/permission sensitive) |
-| vscode    | `~/.config/Code/User/settings.json` | JSON | ❌ create-only (JSON merge not supported) |
-| zsh       | `~/.zshrc` | shell | handled by `shell` and `shell-functions.sh` |
+| vscode    | `~/.config/Code/User/settings.json` | JSON | create-only only (rejected for overwrite-managed) |
+| zsh       | `~/.zshrc` | shell | handled by `manifest-shell` |
 
-## Format compatibility matrix for overwrite-managed
+## Format compatibility for overwrite-managed
 
-The `overwrite-managed` strategy works ONLY for comment-supporting formats. "Comment-supporting" means the format has a line-comment syntax that setmeup can use for its managed-file markers.
+The `overwrite-managed` strategy works ONLY for comment-supporting formats. The implemented `validate()` rejects `overwrite-managed` for paths ending in `.json` or `.xml` (comment-less formats). For other comment-less or binary formats, use `create-only`:
 
-| Format | Comment syntax | `overwrite-managed` supportable? |
-|--------|---------------|----------------------------------|
-| Shell script | `#` | ✅ Yes |
-| INI / `.gitconfig` | `#` or `;` | ✅ Yes (use `#` marker) |
-| Python/TOML | `#` | ✅ Yes (TOML officially supports `#`) |
-| YAML | `#` | ✅ Yes |
-| Lua | `--` | ✅ Yes |
-| C-style (`//`) | `//` | ✅ Yes |
-| Line-per-flag | `#` | ✅ Yes |
-| gitignore | `#` | ✅ Yes |
-| **JSON** | **none** | **❌ No** — must use `create-only` |
-| **XML** | `<!-- -->` | **❌ No** — block comments only; use `create-only` |
-| **Binary** | none | **❌ No** — must use `create-only` |
-| **TOML** | `#` | ❌ No by policy — see risk notes |
+| Format | Comment syntax | `overwrite-managed`? |
+|--------|---------------|----------------------|
+| Shell script | `#` | Yes |
+| INI / `.gitconfig` | `#` or `;` | Yes (use `#` marker) |
+| YAML | `#` | Yes |
+| Lua | `--` | Yes |
+| C-style (`//`) | `//` | Yes |
+| Line-per-flag | `#` | Yes |
+| gitignore | `#` | Yes |
+| **JSON** | **none** | **No — rejected at validation** |
+| **XML** | **none (block only)** | **No — rejected at validation** |
+| **Binary** | none | No — use `create-only` |
 
-**Policy rule for TOML:** Despite having `#` comments, TOML is excluded from `overwrite-managed` because:
-1. TOML is commonly machine-edited; users may have tables/keys added by other tools that would be lost on overwrite.
-2. Key ordering is semantically meaningful in TOML; overwriting can change behavior if the tool expects a specific section order.
-3. Arbitrary overwrite of `~/.config/starship.toml` or `~/.cargo/config.toml` could break the user's tool setup.
+Marker variants by format: `# managed by setmeup` (shell/YAML/Python/INI), `// managed by setmeup` (C-family/CSS/JS/TS), `; managed by setmeup` (INI-style). The exact marker line used by the implementation is emitted by the `ConfigsHandler`.
 
 ---
 
@@ -66,178 +57,102 @@ The `overwrite-managed` strategy works ONLY for comment-supporting formats. "Com
 ## Block structure
 
 ```yaml
-configs:
-  - path: <absolute-file-path>    # required
-    content: <multiline-string>    # required (inline or literal block)
-    strategy: <strategy>           # optional, default: create-only
-    if-absent: <path>              # optional, only apply if this path exists
+configs:                        # map tool-name -> ConfigFile
+  <tool-name>:                  # arbitrary label (e.g. yt-dlp, git)
+    path: <absolute-file-path>  # required; absolute or ~-relative
+    content: <multiline-string> # required; complete file content
+    strategy: <strategy>        # optional; default create-only
 ```
 
 ## Required vs optional fields
 
 | Field      | Required | Description |
 |------------|----------|-------------|
-| `path`     | ✅       | Absolute file path for the config file (e.g., `~/.gitconfig`, `~/.config/starship.toml`). Tilde expansion happens at provisioning time. |
-| `content`  | ✅       | File content as a YAML literal block. This is the complete file content (for create-only and overwrite-managed) or the managed-segment content (for merge, future). |
-| `strategy` |          | One of: `create-only`, `overwrite-managed`. Default: `create-only`. |
-| `if-absent`|          | A path to check. If the specified file or directory does not exist, this config entry is skipped (useful for tool-specific configs that should only apply when the tool is installed). |
+| `path`     | ✅       | File path for the config file (e.g., `~/.config/yt-dlp/config`, `~/.gitconfig`). Tilde expansion happens at provisioning time. |
+| `content`  | ✅       | File content as a YAML literal block. The complete file content. |
+| `strategy` |          | One of: `create-only`, `overwrite-managed`, `merge`. Default: `create-only`. |
+
+There is no `if-absent` field and no per-entry nested sub-options in the implemented schema.
 
 ## Strategy semantics
 
 | Strategy | Description | Marker required? | Overwrites user changes? |
 |----------|-------------|------------------|--------------------------|
-| `create-only` | Only writes if `path` does not exist. If the file exists (regardless of content), it is left untouched. | No | No |
-| `overwrite-managed` | Writes only if `path` exists AND the file content matches a setmeup marker pattern. Regenerates the entire file from `content`. If no marker is detected, it refuses and reports `Failed`. | Yes | Yes (only managed files) |
+| `create-only` | Writes only if `path` does not exist. If the file exists (regardless of content), it is left untouched and reported user-managed. | No | No |
+| `overwrite-managed` | Writes if `path` does not exist OR the existing file contains the setmeup marker. Regenerates the full file. Refuses (reports divergence) if the file exists without the marker. Only valid for comment-capable formats. | Yes | Yes (only files bearing the marker) |
+| `merge` | Declared enum variant; line-blend semantics with conflict flagging are not yet implemented. | Yes (planned) | Planned |
 
 ### create-only (default)
 
-The safest strategy. Writes the file only when the target path does not exist. Once the file exists — whether created by setmeup or by the user — it is never modified. This is correct for:
-- Binary format configs (JSON, XML, compiled).
+The safest strategy. Writes only when the target does not exist. Once the file exists — whether created by setmeup or the user — it is never modified. Correct for:
+- Comment-less formats (JSON, XML, binary).
 - Configs that other tools also manage.
-- Configs that, once created, the user customizes heavily.
+- Configs the user customizes heavily after first creation.
 
-### overwrite-managed (requires comment markers)
+### overwrite-managed
 
-Only valid for formats that support line comments (`#`, `//`, `;`, `--`). The config file content must include a marker comment near the top:
+Valid only for comment-supporting formats. The written content includes a marker comment near the top so re-runs can recognize setmeup ownership. If a file exists without the marker, setmeup refuses to overwrite it (safety guard).
 
-```
-# >>> setmeup managed — edits may be overwritten
-```
+### merge
 
-When the file does not contain this marker, setmeup refuses to overwrite it (safety guard). When the marker is present, setmeup may regenerate the entire file.
+Declared enum variant (`ConfigStrategy::Merge`) but NOT implemented — provisioning treats it as not-yet-supported. Do not emit `merge` in manifests expecting behavior; it is an explicit marker for future block-merge semantics.
 
-### merge (future, not yet implemented)
+## Validation rules (implemented)
 
-A future strategy that allows surgically inserting setmeup-managed blocks into a larger file while preserving user-maintained sections around them. Not yet implemented. When designing merge, the block-marker pattern would be:
-
-```
-# === setmeup: section-name begin ===
-...managed content...
-# === setmeup: section-name end ===
-```
-
-## Validation rules
-
-1. `path` must be non-empty and absolute (starting with `/` or `~`).
+1. `path` must be non-empty.
 2. `content` must be non-empty.
-3. `strategy` must be one of: `create-only`, `overwrite-managed`.
-4. `overwrite-managed` strategy is rejected for JSON, XML, and any format whose filename extension does not line-comment-supporting. Reference list at time of validation:
-   - Allowed: `.sh`, `.bash`, `.zsh`, `.conf`, `.cfg`, `.ini`, `.gitconfig`, `.tmux.conf`, `.lua`, `.py`, `.yaml`, `.yml`, `.gitignore`, `.ripgreprc`, `.editorconfig`, `.mermaid`, `.env`, `.tool-versions`.
-   - Rejected: `.json`, `.xml`, `.toml`, `.bin`, `.exe`, `.png`, `.jpg`, `.pdf`, `.lock`, `.mod`, `.sum`.
-5. `if-absent` when provided must be an absolute path (file or directory).
-6. Content for overwrite-managed MUST include the marker line `# >>> setmeup managed — edits may be overwritten` (or the appropriate comment-syntax variant) as the first or second line.
-7. `path` values must be unique across the `configs` list.
+3. `strategy` must be one of `create-only`, `overwrite-managed`, `merge`.
+4. `overwrite-managed` for `.json` or `.xml` paths is rejected at manifest validation: only `create-only` is valid for comment-less formats.
 
 ## Example YAML
 
 ```yaml
 configs:
-  - path: ~/.gitconfig
-    strategy: overwrite-managed
-    content: |
-      # >>> setmeup managed — edits may be overwritten
-      [user]
-        name = Jane Doe
-        email = jane@example.com
-      [core]
-        editor = nvim
-        pager = delta
-      [init]
-        defaultBranch = main
-
-  - path: ~/.config/starship.toml
+  yt-dlp:
+    path: ~/.config/yt-dlp/config
     strategy: create-only
     content: |
-      format = "$all"
-      add_newline = true
-      [character]
-        success_symbol = "[➜](bold.green)"
-      [nodejs]
-        format = "via [⬢ $version](bold.green) "
+      -o ~/downloads/%(title)s.%(ext)s
 
-  - path: ~/.tmux.conf
+  git:
+    path: ~/.gitconfig
     strategy: overwrite-managed
-    if-absent: /usr/bin/tmux
     content: |
-      # >>> setmeup managed — edits may be overwritten
-      set -g default-terminal "tmux-256color"
-      set -ga terminal-overrides ",*256col*:Tc"
-      set -g mouse on
-      bind r source-file ~/.tmux.conf
+      # managed by setmeup
+      [user]
+        name = Jane Doe
+      [core]
+        editor = nvim
 ```
 
 ---
 
 # Provisioning
 
-## Install command template
+## Handler behavior
 
-```rust
-fn apply_config(path: &Path, content: &str, strategy: &Strategy) -> Result<ItemStatus> {
-    let expanded = path.to_str().unwrap().replace('~', &home_dir());
-    let target = Path::new(&expanded);
+The `ConfigsHandler` (in `src/provisioning.rs`) walks the declared `configs` map in fixed order and per entry:
 
-    match strategy {
-        Strategy::CreateOnly => {
-            if target.exists() {
-                return Ok(ItemStatus::Satisfied); // leave untouched
-            }
-            // Create parent dirs, write file
-            fs::create_dir_all(target.parent().unwrap())?;
-            fs::write(target, content)?;
-            Ok(ItemStatus::Satisfied)
-        }
+1. `check_config`: 
+   - File absent → `NeedsProvision`
+   - File present, content matches → `Satisfied`
+   - File present, differs → for `create-only`: `ManagedByUser` (never write); for `overwrite-managed`: marker present → `NeedsProvision`, marker absent → `ManagedByUser`
+2. `provision_config`: only invoked on `NeedsProvision`; ensures parent dirs, applies quoting if needed, writes the file (adding the marker header for `overwrite-managed`).
 
-        Strategy::OverwriteManaged => {
-            if !target.exists() {
-                return Ok(ItemStatus::Satisfied); // nothing to manage yet
-            }
-            let existing = fs::read_to_string(target)?;
-            if !existing.contains(MANAGED_MARKER_LINE) {
-                return Ok(ItemStatus::Failed(
-                    "Refusing to overwrite: file exists but no setmeup marker found".into()
-                ));
-            }
-            if existing.trim() == content.trim() {
-                return Ok(ItemStatus::Satisfied); // content matches, skip
-            }
-            fs::write(target, content)?;
-            Ok(ItemStatus::Satisfied)
-        }
-    }
-}
-```
-
-## Config file location and format
-
-- `path` determines the destination; setmeup creates parent directories as needed.
-- No central managed-file directory — each config lives at the tool's expected path.
-- The marker comment `# >>> setmeup managed — edits may be overwritten` is used for language-appropriate comment syntax:
-  - `#` for shell, YAML, Python, INI, .gitignore, etc.
-  - `//` for C-style languages (`.lua` uses `--`, which setmeup respects).
-  - `;` for some INI variants.
-
-## Verification command
+## Verification
 
 ```bash
 # File exists at target path
-test -f ~/.gitconfig
+test -f ~/.config/yt-dlp/config
 
-# File content matches (for overwrite-managed)
-diff -q <(echo "$declared_content") ~/.gitconfig
-
-# Marker is present (for overwrite-managed)
-grep -q 'setmeup managed' ~/.gitconfig
-
-# If using create-only: file was not overwritten if it existed
-test "$(stat -c %Y ~/.gitconfig)" -le "$(stat -c %Y ~/.config/setmeup/.last-apply)"
+# Marker present (for overwrite-managed)
+grep -q 'managed by setmeup' ~/.gitconfig
 ```
 
 ## Dependencies on other capabilities
 
-- **No strict ordering dependencies.** Configs can be applied before or after package installation.
-- **`if-absent` dependencies:** If a config uses `if-absent: /usr/bin/tmux`, the `packages` section must install tmux before this config runs.
-- **Recommended ordering:** `packages` → `configs` so tool-specific configs are written after the tool is installed.
+- **Recommended ordering:** `packages` → `configs` so tool-specific configs are written after the tool is installed (fixed order in `provision()`).
+- No runtime dependency on other sections.
 
 ---
 
@@ -245,33 +160,24 @@ test "$(stat -c %Y ~/.gitconfig)" -le "$(stat -c %Y ~/.config/setmeup/.last-appl
 
 ## How to check if already satisfied
 
-**create-only:**
-1. Target path exists (file or symlink).
-2. Content is not compared; any content at the target is accepted.
+**create-only:** target `path` exists → satisfied permanently (setmeup never re-touches it).
 
-**overwrite-managed:**
-1. Target path exists.
-2. The `setmeup managed` marker line is present in the first 3 lines of the file.
-3. The full file content matches the declared content (byte-for-byte).
-
-If ALL conditions for the strategy are satisfied, the config entry reports `Satisfied` and no write occurs.
+**overwrite-managed:** target exists AND marker line present AND full content matches declared content byte-for-byte.
 
 ## What constitutes "divergent" state
 
-**create-only:**
-- No divergence possible — once the file exists, setmeup never touches it again.
+**create-only:** no divergence possible — files are only created once.
 
 **overwrite-managed:**
-- **File missing:** the marker cannot be found → create the file (it's managed, so no need to be cautious about overwriting).
-- **Marker present, content differs:** the file has a setmeup marker but the content doesn't match. → Overwrite with the declared content.
-- **Marker absent, file was created by user:** setmeup refuses to overwrite and reports `ItemStatus::Failed`. The user must either add the marker manually or remove the file.
-- **Marker absent, file was created by setmeup in a previous version:** setmeup recognizes it as a managed legacy file only if a companion marker file exists (future: `~/.config/setmeup/managed-files/<hash>`).
+- File missing → create it.
+- Marker present, content differs → regenerate (divergent, will rewrite).
+- Marker absent → user-managed; report and do NOT overwrite.
 
-## What state is "user-managed" (no setmeup marker)
+## What state is "user-managed"
 
-- Any config file that does not contain the setmeup marker comment is considered user-managed. The `overwrite-managed` strategy refuses to touch it.
-- For `create-only` strategy, all existing files are treated as user-managed (setmeup never overwrites them).
-- The distinction is purely by marker absence, not by content comparison.
+- Any file without the setmeup marker, under any strategy, is user-managed.
+- For `create-only`, every existing file is treated as user-managed forever.
+- Removal of a config from the manifest does NOT delete the file on disk (convergence-only model).
 
 ---
 
@@ -281,21 +187,18 @@ If ALL conditions for the strategy are satisfied, the config entry reports `Sati
 
 | Field      | Type | Widget |
 |------------|------|--------|
-| `path`     | free text | Text input; show autocomplete for common config paths |
-| `content`  | free text | Multi-line text area; syntax highlighting by file extension |
-| `strategy` | list toggle | Options: `create-only`, `overwrite-managed` |
-| `if-absent`| free text | Optional path input |
+| `(name)`   | free text | Label for the config entry (map key) |
+| `path`     | free text | Target path |
+| `content`  | free text | Multi-line text area |
+| `strategy` | list toggle | `create-only`, `overwrite-managed`, `merge` (merge marked not-yet-implemented) |
 
 ## Default values
 
 - `strategy`: `create-only` (safest default).
 - `content`: empty (user must provide).
-- `if-absent`: empty (always apply).
 
 ## Validation rules (wizard-specific)
 
-- `path` must start with `/` or `~`.
-- `path` must be a file path, not just a directory (the wizard rejects paths ending in `/`).
-- `strategy` `overwrite-managed` is only offered when the file extension is in the allowed list (see "Format compatibility matrix" above).
+- `path` must start with `/` or `~` and be a file path.
+- `overwrite-managed` is only offered when the path does not end in `.json`/`.xml`.
 - `content` must be non-empty.
-- If `strategy` is `overwrite-managed`, the wizard automatically prepends the marker line `# >>> setmeup managed — edits may be overwritten\n` to the content if absent.
